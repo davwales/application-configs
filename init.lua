@@ -91,7 +91,7 @@ vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
 -- Set to true if you have a Nerd Font installed and selected in the terminal
-vim.g.have_nerd_font = false
+vim.g.have_nerd_font = true
 
 -- [[ Setting options ]]
 -- See `:help vim.o`
@@ -606,7 +606,7 @@ require('lazy').setup({
         -- clangd = {},
         -- gopls = {},
         -- pyright = {},
-        rust_analyzer = {},
+        -- rust_analyzer = {},
         --
         -- Some languages (like typescript) have entire language plugins that can be useful:
         --    https://github.com/pmizio/typescript-tools.nvim
@@ -855,7 +855,7 @@ require('lazy').setup({
   { -- Highlight, edit, and navigate code
     'nvim-treesitter/nvim-treesitter',
     config = function()
-      local filetypes = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' }
+      local filetypes = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc', 'c_sharp', 'python', 'rust' }
       require('nvim-treesitter').install(filetypes)
       vim.api.nvim_create_autocmd('FileType', {
         pattern = filetypes,
@@ -881,6 +881,53 @@ require('lazy').setup({
   require 'kickstart.plugins.gitsigns', -- adds gitsigns recommend keymaps
 
   { 'tpope/vim-fugitive' },
+
+  {
+    'mrcjkb/rustaceanvim',
+    version = '^8',
+    lazy = false,
+  },
+
+  {
+    'nvim-neotest/neotest',
+    dependencies = {
+      'nvim-neotest/nvim-nio',
+      'nvim-lua/plenary.nvim',
+      'antoinemadec/FixCursorHold.nvim',
+      'nvim-treesitter/nvim-treesitter',
+      'Issafalcon/neotest-dotnet',
+      'nvim-neotest/neotest-python',
+      'mrcjkb/rustaceanvim',
+    },
+    keys = {
+      { '<leader>tr', function() require('neotest').run.run() end, desc = 'Run Nearest' },
+      { '<leader>tf', function() require('neotest').run.run(vim.fn.expand '%') end, desc = 'Run File' },
+      { '<leader>ts', function() require('neotest').summary.toggle() end, desc = 'Toggle Summary' },
+      { '<leader>to', function() require('neotest').output.open { enter = true } end, desc = 'Show Output' },
+    },
+    config = function()
+      require('neotest').setup {
+        adapters = {
+          require 'neotest-dotnet' {
+            discovery_root = 'solution',
+          },
+
+          require 'neotest-python',
+
+          require 'rustaceanvim.neotest',
+        },
+        summary = {
+          enabled = true,
+          expand_errors = true,
+          follow = true,
+          mappings = {
+            run = 'r',
+            debug = 'd',
+          },
+        },
+      }
+    end,
+  },
 
   -- NOTE: The import below can automatically add your own plugins, configuration, etc from `lua/custom/plugins/*.lua`
   --    This is the easiest way to modularize your config.
