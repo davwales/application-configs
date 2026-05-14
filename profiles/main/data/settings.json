@@ -1,0 +1,12 @@
+{
+    "workbench.colorTheme": "Catppuccin Mocha",
+    "editor.formatOnSave": true,
+    "[csharp]": {
+        "editor.defaultFormatter": "csharpier.csharpier-vscode"
+    },
+    "git.autofetch": true,
+    "workbench.iconTheme": "catppuccin-mocha",
+    "dotnet.server.useOmnisharp": false,
+    "git.confirmSync": false,
+    "dotnet.formatting.organizeImportsOnFormat": true
+}
