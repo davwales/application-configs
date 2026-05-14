@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dreki-gg/pi-extensions/main/packages/context7/config.schema.json",
+  "resolveLibraryId": { "description": "Resolve a library/package name to a Context7 library ID" },
+  "getLibraryDocs": { "description": "Fetch curated docs by ID or name (auto-resolves)" },
+  "cache": {
+    "resolveTtlHours": 168,
+    "docsTtlHours": 24
+  }
+}

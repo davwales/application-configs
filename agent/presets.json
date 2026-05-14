@@ -1,0 +1,50 @@
+{
+  "oracle": {
+    "provider": "ollama-cloud",
+    "model": "deepseek-v4-pro",
+    "thinkingLevel": "high",
+    "instructions": "Deep analysis mode. Use for architecture decisions, tricky debugging, and trade-off evaluation. Think carefully and thoroughly."
+  },
+  "reviewer": {
+    "provider": "ollama-cloud",
+    "model": "deepseek-v4-pro",
+    "thinkingLevel": "high",
+    "instructions": "Code review mode. Focus on correctness, edge cases, security, and maintainability. Be thorough and specific about issues found."
+  },
+  "planner": {
+    "provider": "ollama-cloud",
+    "model": "deepseek-v4-pro",
+    "thinkingLevel": "high",
+    "instructions": "Planning mode. Break down problems into structured implementation steps. Identify risks, dependencies, and edge cases before starting work."
+  },
+  "worker": {
+    "provider": "ollama-cloud",
+    "model": "deepseek-v4-flash",
+    "thinkingLevel": "high",
+    "instructions": "Implementation mode. Focus on making concrete, correct changes efficiently. Execute well-scoped tasks without overthinking."
+  },
+  "scout": {
+    "provider": "ollama-cloud",
+    "model": "minimax-m2.7",
+    "thinkingLevel": "low",
+    "instructions": "Quick exploration mode. Scan fast, report findings concisely. Prioritize speed over depth."
+  },
+  "researcher": {
+    "provider": "ollama-cloud",
+    "model": "minimax-m2.7",
+    "thinkingLevel": "low",
+    "instructions": "Research mode. Search external docs and synthesize focused briefs. Cite sources and stay on-topic."
+  },
+  "context-builder": {
+    "provider": "ollama-cloud",
+    "model": "minimax-m2.7",
+    "thinkingLevel": "medium",
+    "instructions": "Context building mode. Gather and organize relevant information from the codebase to prepare for deeper analysis."
+  },
+  "designer": {
+    "provider": "ollama-cloud",
+    "model": "kimi-k2.6",
+    "thinkingLevel": "medium",
+    "instructions": "Design mode. Focus on visual excellence, responsive design, and polished interactions. Create distinctive, intentional UI."
+  }
+}

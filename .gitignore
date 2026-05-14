@@ -1,0 +1,23 @@
+# Sensitive / Secret Files
+agent/auth.json
+
+# Session & Runtime Data
+agent/run-history.jsonl
+agent/sessions/
+
+# Cached Data
+agent/cache/
+agent/extensions/context7/cache/
+
+# Auto-managed Extensions
+agent/git/
+
+# Compass
+compass/
+
+# Temp / Generated
+context.md
+*.log
+.DS_Store
+Thumbs.db
+node_modules/
