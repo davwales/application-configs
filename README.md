@@ -1,3 +1,11 @@
+# Neovim Configuration
+
+Based on [kickstart.nvim](https://github.com/nvim-lua/kickstart.nvim).
+
+> This is the [`nvim`](../../tree/nvim) branch of [application-configs](../../tree/main). For other application configs, see the [main branch](../../tree/main).
+
+---
+
 # kickstart.nvim
 
 ## Introduction
