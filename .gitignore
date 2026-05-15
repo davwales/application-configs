@@ -21,3 +21,8 @@ context.md
 .DS_Store
 Thumbs.db
 node_modules/
+
+# Pi package downloads
+package/
+*.tgz
+plan.md
