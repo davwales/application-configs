@@ -9,6 +9,9 @@ agent/sessions/
 agent/cache/
 agent/extensions/context7/cache/
 
+# Auto-managed Binaries
+agent/bin/
+
 # Auto-managed Extensions
 agent/git/
 
