@@ -10,6 +10,7 @@
     "pathAccess": true
   },
   "pathAccess": {
-    "mode": "ask"
+    "mode": "ask",
+    "allowedPaths": ["/dev/null", "/dev/zero", "/dev/tty", "/dev/urandom", "/dev/random"]
   }
 }

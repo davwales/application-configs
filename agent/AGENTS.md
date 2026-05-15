@@ -118,6 +118,15 @@ Never guess and silently implement something the user might not want.
 - Use `codebase_map` and `code_tour` for orientation
 - Use Context7 tools for external library documentation
 
+## Bash Command Hygiene
+
+The bash tool spawns processes with the CWD already set to the session's working directory. The system prompt tells you what that directory is. Follow these rules:
+
+- **Never use `cd <dir> &&` prefixes.** The CWD is handled at the spawn level. A `cd` prefix is redundant and triggers false-positive guardrails path access prompts for the target directory.
+- **Never use `2>/dev/null`.** The tool already captures stderr. Suppressing it hides useful error output and triggers false-positive guardrails prompts because `/dev/null` is outside the workspace boundary.
+- **Use absolute paths** if you need to reference something outside the CWD. The guardrails pathAccess feature will prompt the user appropriately for genuine outside-directory access.
+- **Prefer the dedicated tools** (grep, find, ls, read, edit) over bash commands. They respect .gitignore, have structured output, and don't trigger the shell path extractor.
+
 ## Code Style
 
 - Write clean, minimal code - no over-engineering
