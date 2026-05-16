@@ -910,8 +910,7 @@ export default function (pi: ExtensionAPI) {
 
 			// Single agent - just show name, renderResult will show the full layout
 			const agentName = args.agent || "...";
-			const desc = args.desc ? theme.fg("dim", ` - ${args.desc}`) : "";
-			let text = theme.fg("muted", "dispatching ") + theme.fg("accent", agentName) + desc;
+			let text = theme.fg("muted", "dispatching ") + theme.fg("accent", agentName);
 			return new Text(text, 0, 0);
 		},
 
