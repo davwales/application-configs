@@ -435,7 +435,7 @@ async function runSingleAgent(
 					}, 5000);
 				};
 				if (signal.aborted) killProc();
-				else signal.addEventListener("abort", killProc, { once: true });
+				else if (typeof signal.addEventListener === 'function') signal.addEventListener("abort", killProc, { once: true });
 			}
 		});
 
@@ -610,7 +610,7 @@ function renderExpandedSingle(
 			container.addChild(new Spacer(1));
 			container.addChild(new Text(themeFg("muted", `─── Turn ${turnCount} ───`), 0, 0));
 			container.addChild(
-				new Text(theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme)), 0, 0),
+				new Text(themeFg("muted", "→ ") + formatToolCall(item.name, item.args, themeFg), 0, 0),
 			);
 		} else if (item.type === "text") {
 			// Accumulate text responses after tool calls
@@ -787,6 +787,8 @@ export default function (pi: ExtensionAPI) {
 				for (let i = 0; i < params.tasks.length; i++) {
 					allResults[i] = {
 						agent: params.tasks[i].agent,
+						agentDescription: "",
+						displayDesc: params.tasks[i].desc || "",
 						agentSource: "unknown",
 						task: params.tasks[i].task,
 						exitCode: -1, // -1 = still running
@@ -918,10 +920,8 @@ export default function (pi: ExtensionAPI) {
 			try {
 			const details = result.details as SubagentDetails | undefined;
 			if (!details || details.results.length === 0) {
-				// Debug: show what we actually got
 				const text = result.content[0];
-				const debugInfo = `no details (mode=${details?.mode}, results=${details?.results?.length ?? 0})`;
-				return new Text(text?.type === "text" ? `${text.text}\n[${debugInfo}]` : "(no output)", 0, 0);
+				return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
 			}
 
 			// Track start time for duration display
@@ -929,6 +929,15 @@ export default function (pi: ExtensionAPI) {
 				context.state.startTime = Date.now();
 			}
 			const elapsed = Math.round((Date.now() - context.state.startTime) / 1000);
+
+			// Periodic re-renders for duration updates
+			if (isPartial && !context.state.interval) {
+				context.state.interval = setInterval(() => context.invalidate(), 1000);
+			}
+			if (!isPartial && context.state.interval) {
+				clearInterval(context.state.interval);
+				context.state.interval = undefined;
+			}
 
 			const mdTheme = getMarkdownTheme();
 
@@ -1124,7 +1133,7 @@ export default function (pi: ExtensionAPI) {
 				const lines: string[] = [];
 				lines.push(running > 0 ? theme.fg("warning", "parallel: ") + theme.fg("accent", `${details.results.length} tasks`) : theme.fg("muted", "parallel: ") + theme.fg("accent", `${details.results.filter(r => r.exitCode === 0).length}/${details.results.length} done`));
 				for (const r of details.results) {
-					const isRunning = r.exitCode === -1;
+					const isRunning = isPartial || r.exitCode === -1;
 					const icon = isRunning
 						? theme.fg("warning", "●")
 						: r.exitCode !== 0
