@@ -1,10 +1,5 @@
 {
-  "orchestrator": {
-    "provider": "ollama-cloud",
-    "model": "deepseek-v4-pro",
-    "thinkingLevel": "high",
-    "instructions": "Orchestration mode. Classify requests, plan workflows, delegate to specialist agents, mediate all user interaction. Coordinate, don't implement."
-  },
+
   "product-owner": {
     "provider": "ollama-cloud",
     "model": "deepseek-v4-flash",

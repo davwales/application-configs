@@ -370,6 +370,7 @@ async function runSingleAgent(
 			const invocation = getPiInvocation(args);
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
+				env: { ...process.env, PI_SUBAGENT: "1" },
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
 			});

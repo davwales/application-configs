@@ -1,144 +1,17 @@
 # Agent Instructions
 
-## Fleet Overview
+## Fleet
 
-The system uses a fleet of 9 specialist agents orchestrated by a central orchestrator:
-
-| Agent | Role | Model | Thinking |
-|-------|------|-------|----------|
-| `orchestrator` | Entry point & workflow coordination | deepseek-v4-pro | high |
-| `product-owner` | Requirements refinement & sign-off | deepseek-v4-pro | high |
-| `architect` | Architecture design (read-only) | deepseek-v4-pro | high |
-| `researcher` | External docs & dependency research | minimax-m2.7 | low |
-| `designer` | Component/layout blueprints | kimi-k2.6 | medium |
-| `scout` | Codebase reconnaissance | minimax-m2.7 | low |
-| `frontend-developer` | Frontend implementation | deepseek-v4-flash | high |
-| `backend-developer` | Backend implementation | deepseek-v4-flash | high |
-| `reviewer` | Code quality review | deepseek-v4-pro | high |
-
-## Mandatory Workflow: Orchestrator-First
-
-**Every request enters through the orchestrator.** The orchestrator classifies the request, plans the workflow, and delegates to the appropriate agents. No other agent interacts with the user directly.
-
-### Step 1: Classify
-The orchestrator determines the request type:
-- **New feature** → full pipeline
-- **Enhancement/tweak** → reduced pipeline
-- **Bug fix** → minimal pipeline
-- **Question/exploration** → scout/researcher only
-
-### Step 2: Plan
-The orchestrator creates an execution plan using the `todo` tool, identifying which agents to call and in what order.
-
-### Step 3: Execute
-The orchestrator delegates to specialist agents, mediating all communication between them and the user.
-
-### Step 4: Validate
-After implementation, the reviewer checks code quality and the product-owner validates functionality against acceptance criteria.
-
-## Workflow Patterns
-
-### New Feature (Full Pipeline)
-```
-1. [USER] → orchestrator
-2. orchestrator → clarify with user if needed
-3. orchestrator → scout (codebase context)
-4. orchestrator → product-owner (refine requirements + acceptance criteria)
-5. [IF UNKNOWNs] orchestrator → researcher → loop back to product-owner
-6. orchestrator → architect (unified design with frontend/backend boundaries)
-7. orchestrator parses architect output → separates frontend spec & backend spec
-8. orchestrator → designer (frontend blueprint from frontend spec)
-9. [PARALLEL where possible] orchestrator → backend-developer (backend spec)
-10. orchestrator → frontend-developer (designer blueprint + frontend spec)
-11. orchestrator → reviewer (quality review)
-12. orchestrator → product-owner (functional sign-off)
-13. orchestrator → [USER] (results)
-```
-
-### Enhancement / Tweak
-```
-1. [USER] → orchestrator
-2. orchestrator → scout (locate relevant code)
-3. orchestrator → product-owner (lightweight scope review)
-4. orchestrator → frontend-developer and/or backend-developer (implement)
-5. orchestrator → reviewer (review)
-6. orchestrator → product-owner (lightweight sign-off)
-7. orchestrator → [USER] (results)
-```
-
-### Bug Fix
-```
-1. [USER] → orchestrator
-2. orchestrator → scout (locate the bug)
-3. orchestrator → frontend-developer OR backend-developer (fix)
-4. orchestrator → reviewer (review the fix)
-5. orchestrator → [USER] (results)
-```
-
-### Question / Exploration
-```
-1. [USER] → orchestrator
-2. orchestrator → scout and/or researcher (gather info)
-3. orchestrator → [USER] (answer)
-```
-
-## YOU MUST Delegate to Subagents
-
-**This is not optional.** The orchestrator delegates ALL specialist work. It does not implement code, design architecture, or review changes itself.
-
-### Codebase exploration → ALWAYS use `scout`
-```
-subagent({ agent: "scout", task: "Map the codebase for: [area]" })
-```
-
-### Requirements refinement → ALWAYS use `product-owner`
-```
-subagent({ agent: "product-owner", task: "Refine requirements: [description]" })
-```
-
-### External unknowns → ALWAYS use `researcher`
-```
-subagent({ agent: "researcher", task: "Research: [question]" })
-```
-
-### Architecture design → ALWAYS use `architect`
-```
-subagent({ agent: "architect", task: "Design architecture for: [feature]" })
-```
-
-### UI blueprint → ALWAYS use `designer`
-```
-subagent({ agent: "designer", task: "Create component blueprint for: [frontend specs]" })
-```
-
-### Frontend code → ALWAYS use `frontend-developer`
-```
-subagent({ agent: "frontend-developer", task: "Implement frontend: [spec + blueprint]" })
-```
-
-### Backend code → ALWAYS use `backend-developer`
-```
-subagent({ agent: "backend-developer", task: "Implement backend: [spec]" })
-```
-
-### Quality review → ALWAYS use `reviewer`
-```
-subagent({ agent: "reviewer", task: "Review changes for quality and spec alignment", context: "fresh" })
-```
-
-### Functional sign-off → ALWAYS use `product-owner`
-```
-subagent({ agent: "product-owner", task: "Sign off on functionality: [changes + acceptance criteria]" })
-```
-
-## Orchestrator Mediates All User Interaction
-
-**No agent other than the orchestrator communicates with the user.** If the product-owner identifies ambiguities, the researcher has follow-up questions, or the architect needs clarification — they report to the orchestrator, which translates those into user-facing questions via `ask_user_question`.
-
-This ensures:
-- Consistent, polished user communication
-- Proper context is provided with each question
-- Research can be dispatched before bothering the user with questions they shouldn't need to answer
+| Agent | Role |
+|-------|------|
+| `product-owner` | Requirements refinement & sign-off |
+| `architect` | Architecture design (read-only, no implementation) |
+| `researcher` | External docs & dependency research |
+| `designer` | Component/layout blueprints |
+| `scout` | Codebase reconnaissance |
+| `frontend-developer` | Frontend implementation |
+| `backend-developer` | Backend implementation |
+| `reviewer` | Code quality review |
 
 ## Ask Questions When Unsure
 
