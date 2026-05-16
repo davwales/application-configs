@@ -22,7 +22,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, getAgentDir, getMarkdownTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type AgentConfig, type AgentScope, applyAgentOverrides, discoverAgents } from "./agents.js";
+import { type AgentConfig, type AgentScope, applyAgentOverrides, discoverAgents, formatAvailableAgents } from "./agents.js";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -155,6 +155,10 @@ function getLastActionPreview(messages: Message[]): string {
 		}
 	}
 	return "";
+}
+
+function isSubagentError(r: SingleResult): boolean {
+	return r.exitCode !== 0 || r.stopReason === "error" || r.stopReason === "aborted";
 }
 
 function countToolCalls(messages: Message[]): number {
@@ -303,10 +307,10 @@ async function runSingleAgent(
 	const agent = agents.find((a) => a.name === agentName);
 
 	if (!agent) {
-		const available = agents.map((a) => `"${a.name}"`).join(", ") || "none";
+		const available = formatAvailableAgents(agents, true);
 		return {
 			agent: agentName,
-			agentDescription: agent?.description || "",
+			agentDescription: "",
 			displayDesc: "",
 			agentSource: "unknown",
 			task,
@@ -436,8 +440,8 @@ async function runSingleAgent(
 						if (!proc.killed) proc.kill("SIGKILL");
 					}, 5000);
 				};
+				if (typeof signal.addEventListener === 'function') signal.addEventListener("abort", killProc, { once: true });
 				if (signal.aborted) killProc();
-				else if (typeof signal.addEventListener === 'function') signal.addEventListener("abort", killProc, { once: true });
 			}
 		});
 
@@ -507,6 +511,57 @@ function truncateTask(task: string, maxLen: number = 70): string {
 	return firstLine.length > maxLen ? `${firstLine.slice(0, maxLen)}...` : firstLine;
 }
 
+/** Build the collapsed lines for a single result (shared by single, chain, parallel) */
+function renderCollapsedResultLines(
+	r: SingleResult,
+	isRunning: boolean,
+	elapsed: number | undefined,
+	themeFg: (color: any, text: string) => string,
+	markBold: (text: string) => string,
+	opts?: { showCost?: boolean },
+): string[] {
+	const icon = isRunning ? themeFg("warning", "●") : r.exitCode !== 0 ? themeFg("error", "✗") : themeFg("success", "✓");
+	const lines: string[] = [];
+
+	// Row 1: agent name - task intent
+	lines.push(`${icon} ${markBold(r.agent)}${r.displayDesc ? themeFg("dim", ` - ${r.displayDesc}`) : ""}`);
+
+	// Row 2: tool calls - duration
+	if (isRunning) {
+		const calls = countToolCalls(r.messages);
+		const turnsStr = calls > 0 ? `${calls} turn${calls !== 1 ? "s" : ""}` : "starting";
+		const elapsedStr = elapsed !== undefined ? formatDuration(elapsed) : "";
+		lines.push(themeFg("dim", `  ${turnsStr} - ${elapsedStr}`));
+		const preview = getLastActionPreview(r.messages);
+		if (preview) lines.push(themeFg("muted", `  ${preview}`));
+	} else {
+		const usage = r.usage;
+		const parts: string[] = [];
+		if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
+		if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
+		if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
+		if (opts?.showCost && usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
+		if (parts.length > 0) lines.push(themeFg("dim", `  ${parts.join(" ")}`));
+	}
+
+	return lines;
+}
+
+/** Aggregate usage stats across multiple results */
+function aggregateUsage(results: SingleResult[]): UsageStats {
+	const total: UsageStats = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 };
+	for (const r of results) {
+		total.input += r.usage.input;
+		total.output += r.usage.output;
+		total.cacheRead += r.usage.cacheRead;
+		total.cacheWrite += r.usage.cacheWrite;
+		total.cost += r.usage.cost;
+		total.contextTokens += r.usage.contextTokens;
+		total.turns += r.usage.turns;
+	}
+	return total;
+}
+
 /** Build the collapsed preview for a single agent result (multi-line, opencode-style)
  *
  *  Row 1: ✓ scout - Read the auth module
@@ -518,33 +573,9 @@ function renderCollapsedSingle(
 	themeFg: (color: any, text: string) => string,
 	markBold: (text: string) => string,
 	isRunning: boolean,
-	toolCalls?: number,
 	elapsed?: number,
 ): string {
-	const icon = isRunning ? themeFg("warning", "●") : r.exitCode !== 0 ? themeFg("error", "✗") : themeFg("success", "✓");
-	const name = markBold(r.agent);
-	const taskPreview = r.displayDesc ? themeFg("dim", ` - ${r.displayDesc}`) : "";
-
-	// Row 1: agent name - task intent
-	let line1 = `${icon} ${name}${taskPreview}`;
-
-	// Row 2: tool calls - duration
-	let line2: string;
-	if (isRunning) {
-		const calls = toolCalls ?? countToolCalls(r.messages);
-		const turnsStr = calls > 0 ? `${calls} turn${calls !== 1 ? "s" : ""}` : "starting";
-		const elapsedStr = elapsed !== undefined ? formatDuration(elapsed) : "";
-		line2 = themeFg("dim", `  ${turnsStr} - ${elapsedStr}`);
-	} else {
-		// Completed: show turns and tokens
-		const usage = r.usage;
-		const parts: string[] = [];
-		if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
-		if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
-		if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
-		if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
-		line2 = parts.length > 0 ? themeFg("dim", `  ${parts.join(" ")}`) : "";
-	}
+	const lines = renderCollapsedResultLines(r, isRunning, elapsed, themeFg, markBold, { showCost: true });
 
 	// Row 3: latest action
 	const lastAction = getLastActionPreview(r.messages);
@@ -552,12 +583,16 @@ function renderCollapsedSingle(
 
 	// Error display
 	if (!isRunning && r.exitCode !== 0) {
+		let line1 = lines[0] || "";
+		let line2 = lines[1] || "";
 		if (r.stopReason) line1 += themeFg("error", ` [${r.stopReason}]`);
 		if (r.errorMessage) line2 = themeFg("error", `  ${r.errorMessage.slice(0, 80)}`);
+		const result = [line1];
+		if (line2) result.push(line2);
+		if (line3) result.push(line3);
+		return result.join("\n");
 	}
 
-	const lines = [line1];
-	if (line2) lines.push(line2);
 	if (line3) lines.push(line3);
 	return lines.join("\n");
 }
@@ -667,17 +702,12 @@ export default function (pi: ExtensionAPI) {
 			const hasSingle = Boolean(params.agent && params.task);
 			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
 
-			const makeDetails =
-				(mode: "single" | "parallel" | "chain") =>
-				(results: SingleResult[]): SubagentDetails => ({
-					mode,
-					agentScope,
-					projectAgentsDir: discovery.projectAgentsDir,
-					results,
-				});
+			function makeDetails(mode: "single" | "parallel" | "chain", results: SingleResult[]): SubagentDetails {
+				return { mode, agentScope, projectAgentsDir: discovery.projectAgentsDir, results };
+			}
 
 			if (modeCount !== 1) {
-				const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
+				const available = formatAvailableAgents(agents);
 				return {
 					content: [
 						{
@@ -685,7 +715,7 @@ export default function (pi: ExtensionAPI) {
 							text: `Invalid parameters. Provide exactly one mode.\nAvailable agents: ${available}`,
 						},
 					],
-					details: makeDetails("single")([]),
+					details: makeDetails("single", []),
 				};
 			}
 
@@ -709,7 +739,7 @@ export default function (pi: ExtensionAPI) {
 					if (!ok)
 						return {
 							content: [{ type: "text", text: "Canceled: project-local agents not approved." }],
-							details: makeDetails(hasChain ? "chain" : hasTasks ? "parallel" : "single")([]),
+							details: makeDetails(hasChain ? "chain" : hasTasks ? "parallel" : "single", []),
 						};
 				}
 			}
@@ -731,7 +761,7 @@ export default function (pi: ExtensionAPI) {
 									const allResults = [...results, currentResult];
 									onUpdate({
 										content: partial.content,
-										details: makeDetails("chain")(allResults),
+										details: makeDetails("chain", allResults),
 									});
 								}
 							}
@@ -747,18 +777,17 @@ export default function (pi: ExtensionAPI) {
 						i + 1,
 						signal,
 						chainUpdate,
-						makeDetails("chain"),
+						(r) => makeDetails("chain", r),
 					);
 					results.push(result);
 
-					const isError =
-						result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
+					const isError = isSubagentError(result);
 					if (isError) {
 						const errorMsg =
 							result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
 						return {
 							content: [{ type: "text", text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}` }],
-							details: makeDetails("chain")(results),
+							details: makeDetails("chain", results),
 							isError: true,
 						};
 					}
@@ -766,7 +795,7 @@ export default function (pi: ExtensionAPI) {
 				}
 				return {
 					content: [{ type: "text", text: getFinalOutput(results[results.length - 1].messages) || "(no output)" }],
-					details: makeDetails("chain")(results),
+					details: makeDetails("chain", results),
 				};
 			}
 
@@ -779,7 +808,7 @@ export default function (pi: ExtensionAPI) {
 								text: `Too many parallel tasks (${params.tasks.length}). Max is ${MAX_PARALLEL_TASKS}.`,
 							},
 						],
-						details: makeDetails("parallel")([]),
+						details: makeDetails("parallel", []),
 					};
 
 				// Track all results for streaming updates
@@ -809,7 +838,7 @@ export default function (pi: ExtensionAPI) {
 							content: [
 								{ type: "text", text: `Parallel: ${done}/${allResults.length} done, ${running} running...` },
 							],
-							details: makeDetails("parallel")([...allResults]),
+							details: makeDetails("parallel", [...allResults]),
 						});
 					}
 				};
@@ -831,7 +860,7 @@ export default function (pi: ExtensionAPI) {
 								emitParallelUpdate();
 							}
 						},
-						makeDetails("parallel"),
+						(r) => makeDetails("parallel", r),
 					);
 					allResults[index] = result;
 					emitParallelUpdate();
@@ -851,7 +880,7 @@ export default function (pi: ExtensionAPI) {
 							text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n")}`,
 						},
 					],
-					details: makeDetails("parallel")(results),
+					details: makeDetails("parallel", results),
 				};
 			}
 
@@ -866,28 +895,28 @@ export default function (pi: ExtensionAPI) {
 					undefined,
 					signal,
 					onUpdate,
-					makeDetails("single"),
+					(r) => makeDetails("single", r),
 				);
-				const isError = result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
+				const isError = isSubagentError(result);
 				if (isError) {
 					const errorMsg =
 						result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
 					return {
 						content: [{ type: "text", text: `Agent ${result.stopReason || "failed"}: ${errorMsg}` }],
-						details: makeDetails("single")([result]),
+						details: makeDetails("single", [result]),
 						isError: true,
 					};
 				}
 				return {
 					content: [{ type: "text", text: getFinalOutput(result.messages) || "(no output)" }],
-					details: makeDetails("single")([result]),
+					details: makeDetails("single", [result]),
 				};
 			}
 
-			const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
+			const available = formatAvailableAgents(agents);
 			return {
 				content: [{ type: "text", text: `Invalid parameters. Available agents: ${available}` }],
-				details: makeDetails("single")([]),
+				details: makeDetails("single", []),
 			};
 		},
 
@@ -908,8 +937,6 @@ export default function (pi: ExtensionAPI) {
 				const names = args.tasks.map((t: any) => t.agent).join(", ");
 				let text = theme.fg("toolTitle", "subagent") + " ";
 				text += theme.fg("muted", "parallel: ") + theme.fg("accent", names);
-				const count = args.tasks.length;
-	
 				return new Text(text, 0, 0);
 			}
 
@@ -921,84 +948,149 @@ export default function (pi: ExtensionAPI) {
 
 		renderResult(result, { expanded, isPartial }, theme, context) {
 			try {
-			const details = result.details as SubagentDetails | undefined;
-			if (!details || details.results.length === 0) {
-				const text = result.content[0];
-				return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
-			}
-
-			// Track start time for duration display
-			if (!context.state.startTime) {
-				context.state.startTime = Date.now();
-			}
-			const elapsed = Math.round((Date.now() - context.state.startTime) / 1000);
-
-			// Periodic re-renders for duration updates
-			if (isPartial && !context.state.interval) {
-				context.state.interval = setInterval(() => context.invalidate(), 1000);
-			}
-			if (!isPartial && context.state.interval) {
-				clearInterval(context.state.interval);
-				context.state.interval = undefined;
-			}
-
-			const mdTheme = getMarkdownTheme();
-
-			// ── Single agent mode ──────────────────────────────────────────────
-			if (details.mode === "single" && details.results.length === 1) {
-				const r = details.results[0];
-				const isRunning = isPartial || r.exitCode === -1;
-
-				if (expanded) {
-					return renderExpandedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, mdTheme);
+				const details = result.details as SubagentDetails | undefined;
+				if (!details || details.results.length === 0) {
+					const text = result.content[0];
+					return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
 				}
 
-				// Collapsed: multi-line opencode-style preview
-				const toolCalls = countToolCalls(r.messages);
-				const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
-				const lines = renderCollapsedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, toolCalls, isRunning ? stepElapsed : undefined);
-				return new Text(lines, 0, 0);
-			}
+				// Track start time for duration display
+				if (!context.state.startTime) {
+					context.state.startTime = Date.now();
+				}
+				const elapsed = Math.round((Date.now() - context.state.startTime) / 1000);
 
-			// ── Chain mode ─────────────────────────────────────────────────────
-			if (details.mode === "chain") {
-				if (expanded) {
-					const container = new Container();
-					container.addChild(
-						new Text(
-							theme.fg("toolTitle", theme.bold("chain ")) +
-								theme.fg("accent", `${details.results.filter((rr) => rr.exitCode === 0).length}/${details.results.length} steps`),
-							0,
-							0,
-						),
-					);
+				// Periodic re-renders for duration updates
+				if (isPartial && !context.state.interval) {
+					context.state.interval = setInterval(() => context.invalidate(), 1000);
+				}
+				if (!isPartial && context.state.interval) {
+					clearInterval(context.state.interval);
+					context.state.interval = undefined;
+				}
 
-					for (const r of details.results) {
-						const isRunning = isPartial && r.exitCode === -1;
-						const rIcon = isRunning
-							? theme.fg("warning", "●")
-							: r.exitCode !== 0
-								? theme.fg("error", "✗")
-								: theme.fg("success", "✓");
+				const mdTheme = getMarkdownTheme();
 
-						container.addChild(new Spacer(1));
+				// ── Single agent mode ──────────────────────────────────────────────
+				if (details.mode === "single" && details.results.length === 1) {
+					const r = details.results[0];
+					const isRunning = isPartial || r.exitCode === -1;
+
+					if (expanded) {
+						return renderExpandedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, mdTheme);
+					}
+
+					// Collapsed: multi-line opencode-style preview
+					const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
+					const lines = renderCollapsedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, isRunning ? stepElapsed : undefined);
+					return new Text(lines, 0, 0);
+				}
+
+				// ── Chain mode ─────────────────────────────────────────────────────
+				if (details.mode === "chain") {
+					if (expanded) {
+						const container = new Container();
 						container.addChild(
 							new Text(
-								`${theme.fg("muted", `─── ${rIcon} Step ${r.step}: `)}${theme.fg("accent", r.agent)}`,
+								theme.fg("toolTitle", theme.bold("chain ")) +
+									theme.fg("accent", `${details.results.filter((rr) => rr.exitCode === 0).length}/${details.results.length} steps`),
 								0,
 								0,
 							),
 						);
 
-						if (isRunning) {
-							const calls = countToolCalls(r.messages);
-							const turnsStr = calls > 0 ? ` ${calls} turn${calls !== 1 ? "s" : ""}` : "";
-							const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
-						const elapsedStr = ` ${formatDuration(stepElapsed)}`;
-							container.addChild(new Text(theme.fg("dim", `${turnsStr}${elapsedStr}`), 0, 0));
-							const preview = getLastActionPreview(r.messages);
-							if (preview) container.addChild(new Text(theme.fg("dim", `  ${preview}`), 0, 0));
-						} else {
+						for (const r of details.results) {
+							const isRunning = isPartial && r.exitCode === -1;
+							const rIcon = isRunning
+								? theme.fg("warning", "●")
+								: r.exitCode !== 0
+									? theme.fg("error", "✗")
+									: theme.fg("success", "✓");
+
+							container.addChild(new Spacer(1));
+							container.addChild(
+								new Text(
+									`${theme.fg("muted", `─── ${rIcon} Step ${r.step}: `)}${theme.fg("accent", r.agent)}`,
+									0,
+									0,
+								),
+							);
+
+							if (isRunning) {
+								const calls = countToolCalls(r.messages);
+								const turnsStr = calls > 0 ? ` ${calls} turn${calls !== 1 ? "s" : ""}` : "";
+								const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
+							const elapsedStr = ` ${formatDuration(stepElapsed)}`;
+								container.addChild(new Text(theme.fg("dim", `${turnsStr}${elapsedStr}`), 0, 0));
+								const preview = getLastActionPreview(r.messages);
+								if (preview) container.addChild(new Text(theme.fg("dim", `  ${preview}`), 0, 0));
+							} else {
+								// Show conversation turns
+								const items = getDisplayItems(r.messages);
+								let turnCount = 0;
+								for (const item of items) {
+									if (item.type === "toolCall") {
+										turnCount++;
+										container.addChild(
+											new Text(
+												theme.fg("muted", `  Turn ${turnCount}: → `) +
+													formatToolCall(item.name, item.args, theme.fg.bind(theme)),
+												0,
+												0,
+											),
+										);
+									}
+								}
+								const finalOutput = getFinalOutput(r.messages);
+								if (finalOutput) {
+									container.addChild(new Spacer(1));
+									container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
+								}
+							}
+						}
+
+						// Aggregate usage
+						const usageStr = formatUsageStats(aggregateUsage(details.results));
+						if (usageStr) {
+							container.addChild(new Spacer(1));
+							container.addChild(new Text(theme.fg("dim", `= ${usageStr}`), 0, 0));
+						}
+
+						return container;
+					}
+
+					// Collapsed chain: multi-line per step
+					const lines: string[] = [];
+					for (const r of details.results) {
+						const stepRunning = isPartial && r.exitCode === -1;
+						const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
+						lines.push(...renderCollapsedResultLines(r, stepRunning, stepRunning ? stepElapsed : undefined, theme.fg.bind(theme), theme.bold.bind(theme)));
+					}
+					return new Text(lines.join("\n"), 0, 0);
+				}
+
+				// ── Parallel mode ──────────────────────────────────────────────────
+				if (details.mode === "parallel") {
+					const running = details.results.filter((r) => r.exitCode === -1).length;
+
+					if (expanded && running === 0) {
+						const container = new Container();
+						container.addChild(
+							new Text(
+								theme.fg("toolTitle", theme.bold("parallel ")) +
+									theme.fg("accent", `${details.results.filter((r) => r.exitCode === 0).length}/${details.results.length} tasks`),
+								0,
+								0,
+							),
+						);
+
+						for (const r of details.results) {
+							const rIcon = r.exitCode !== 0 ? theme.fg("error", "✗") : theme.fg("success", "✓");
+							container.addChild(new Spacer(1));
+							container.addChild(
+								new Text(`${theme.fg("muted", `─── ${rIcon} `)}${theme.fg("accent", r.agent)}`, 0, 0),
+							);
+
 							// Show conversation turns
 							const items = getDisplayItems(r.messages);
 							let turnCount = 0;
@@ -1021,156 +1113,33 @@ export default function (pi: ExtensionAPI) {
 								container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
 							}
 						}
-					}
 
-					// Aggregate usage
-					const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
-					for (const r of details.results) {
-						total.input += r.usage.input;
-						total.output += r.usage.output;
-						total.cacheRead += r.usage.cacheRead;
-						total.cacheWrite += r.usage.cacheWrite;
-						total.cost += r.usage.cost;
-						total.turns += r.usage.turns;
-					}
-					const usageStr = formatUsageStats(total);
-					if (usageStr) {
-						container.addChild(new Spacer(1));
-						container.addChild(new Text(theme.fg("dim", `= ${usageStr}`), 0, 0));
-					}
-
-					return container;
-				}
-
-				// Collapsed chain: multi-line per step
-				const lines: string[] = [];
-				for (const r of details.results) {
-					const stepRunning = isPartial && r.exitCode === -1;
-					const icon = stepRunning
-						? theme.fg("warning", "●")
-						: r.exitCode !== 0
-							? theme.fg("error", "✗")
-							: theme.fg("success", "✓");
-					lines.push(`${icon} ${theme.bold(r.agent)}${r.displayDesc ? theme.fg("dim", ` - ${r.displayDesc}`) : ""}`);
-					if (stepRunning) {
-						const calls = countToolCalls(r.messages);
-						const turnsStr = calls > 0 ? `${calls} turn${calls !== 1 ? "s" : ""}` : "starting";
-						const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
-					lines.push(theme.fg("dim", `  ${turnsStr} - ${formatDuration(stepElapsed)}`));
-						const preview = getLastActionPreview(r.messages);
-						if (preview) lines.push(theme.fg("muted", `  ${preview}`));
-					} else {
-						const usage = r.usage;
-						const parts: string[] = [];
-						if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
-						if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
-						if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
-						if (parts.length > 0) lines.push(theme.fg("dim", `  ${parts.join(" ")}`));
-					}
-				}
-				return new Text(lines.join("\n"), 0, 0);
-			}
-
-			// ── Parallel mode ──────────────────────────────────────────────────
-			if (details.mode === "parallel") {
-				const running = details.results.filter((r) => r.exitCode === -1).length;
-
-				if (expanded && running === 0) {
-					const container = new Container();
-					container.addChild(
-						new Text(
-							theme.fg("toolTitle", theme.bold("parallel ")) +
-								theme.fg("accent", `${details.results.filter((r) => r.exitCode === 0).length}/${details.results.length} tasks`),
-							0,
-							0,
-						),
-					);
-
-					for (const r of details.results) {
-						const rIcon = r.exitCode !== 0 ? theme.fg("error", "✗") : theme.fg("success", "✓");
-						container.addChild(new Spacer(1));
-						container.addChild(
-							new Text(`${theme.fg("muted", `─── ${rIcon} `)}${theme.fg("accent", r.agent)}`, 0, 0),
-						);
-
-						// Show conversation turns
-						const items = getDisplayItems(r.messages);
-						let turnCount = 0;
-						for (const item of items) {
-							if (item.type === "toolCall") {
-								turnCount++;
-								container.addChild(
-									new Text(
-										theme.fg("muted", `  Turn ${turnCount}: → `) +
-											formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-										0,
-										0,
-									),
-								);
-							}
-						}
-						const finalOutput = getFinalOutput(r.messages);
-						if (finalOutput) {
+						// Aggregate usage
+						const usageStr = formatUsageStats(aggregateUsage(details.results));
+						if (usageStr) {
 							container.addChild(new Spacer(1));
-							container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
+							container.addChild(new Text(theme.fg("dim", `= ${usageStr}`), 0, 0));
 						}
+
+						return container;
 					}
 
-					// Aggregate usage
-					const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
+					// Collapsed parallel: multi-line per agent
+					const lines: string[] = [];
 					for (const r of details.results) {
-						total.input += r.usage.input;
-						total.output += r.usage.output;
-						total.cacheRead += r.usage.cacheRead;
-						total.cacheWrite += r.usage.cacheWrite;
-						total.cost += r.usage.cost;
-						total.turns += r.usage.turns;
-					}
-					const usageStr = formatUsageStats(total);
-					if (usageStr) {
-						container.addChild(new Spacer(1));
-						container.addChild(new Text(theme.fg("dim", `= ${usageStr}`), 0, 0));
-					}
-
-					return container;
-				}
-
-				// Collapsed parallel: multi-line per agent
-				const lines: string[] = [];
-				
-				for (const r of details.results) {
-					const isRunning = isPartial || r.exitCode === -1;
-					const icon = isRunning
-						? theme.fg("warning", "●")
-						: r.exitCode !== 0
-							? theme.fg("error", "✗")
-							: theme.fg("success", "✓");
-					lines.push(`${icon} ${theme.bold(r.agent)}${r.displayDesc ? theme.fg("dim", ` - ${r.displayDesc}`) : ""}`);
-					if (isRunning) {
-						const calls = countToolCalls(r.messages);
-						const turnsStr = calls > 0 ? `${calls} turn${calls !== 1 ? "s" : ""}` : "starting";
+						const isRunning = isPartial || r.exitCode === -1;
 						const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
-					lines.push(theme.fg("dim", `  ${turnsStr} - ${formatDuration(stepElapsed)}`));
-						const preview = getLastActionPreview(r.messages);
-						if (preview) lines.push(theme.fg("muted", `  ${preview}`));
-					} else {
-						const usage = r.usage;
-						const parts: string[] = [];
-						if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
-						if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
-						if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
-						if (parts.length > 0) lines.push(theme.fg("dim", `  ${parts.join(" ")}`));
+						lines.push(...renderCollapsedResultLines(r, isRunning, isRunning ? stepElapsed : undefined, theme.fg.bind(theme), theme.bold.bind(theme)));
 					}
+					return new Text(lines.join("\n"), 0, 0);
 				}
-				return new Text(lines.join("\n"), 0, 0);
-			}
 
-			const text = result.content[0];
-			return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
-		} catch (e) {
-			// If renderResult throws, show the error instead of crashing
-			return new Text(`[subagent render error: ${e instanceof Error ? e.message : String(e)}]`, 0, 0);
-		}
+				const text = result.content[0];
+				return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
+			} catch (e) {
+				// If renderResult throws, show the error instead of crashing
+				return new Text(`[subagent render error: ${e instanceof Error ? e.message : String(e)}]`, 0, 0);
+			}
 		},
 	});
 }

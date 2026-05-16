@@ -164,6 +164,11 @@ export function applyAgentOverrides(agents: AgentConfig[], agentDir: string): Ag
 	});
 }
 
+export function formatAvailableAgents(agents: AgentConfig[], quoted?: boolean): string {
+	if (agents.length === 0) return "none";
+	return agents.map(a => quoted ? `"${a.name}"` : `${a.name} (${a.source})`).join(", ");
+}
+
 export function formatAgentList(agents: AgentConfig[], maxItems: number): { text: string; remaining: number } {
 	if (agents.length === 0) return { text: "none", remaining: 0 };
 	const listed = agents.slice(0, maxItems);
