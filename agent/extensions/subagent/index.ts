@@ -485,10 +485,17 @@ const SubagentParams = Type.Object({
 
 // ─── Render helpers ────────────────────────────────────────────────────────────
 
-/** Truncate a task string for display */
-function truncateTask(task: string, maxLen: number = 60): string {
-	const trimmed = task.replace(/\s+/g, " ").trim();
-	return trimmed.length > maxLen ? `${trimmed.slice(0, maxLen)}...` : trimmed;
+/** Truncate a task string for display - take first line, strip common prefixes */
+function truncateTask(task: string, maxLen: number = 70): string {
+	// Take only the first line
+	let firstLine = task.split("\n")[0].replace(/\s+/g, " ").trim();
+	// Strip common prefixes the LLM adds
+	for (const prefix of ["Task: ", "task: "]) {
+		if (firstLine.startsWith(prefix)) {
+			firstLine = firstLine.slice(prefix.length);
+		}
+	}
+	return firstLine.length > maxLen ? `${firstLine.slice(0, maxLen)}...` : firstLine;
 }
 
 /** Build the collapsed preview for a single agent result (multi-line, opencode-style)
@@ -505,12 +512,12 @@ function renderCollapsedSingle(
 	toolCalls?: number,
 	elapsed?: number,
 ): string {
-	const icon = isRunning ? themeFg("warning", "●") : r.exitCode !== 0 ? themeFg("error", "✗") : themeFg("success", "✓");
+	const icon = isRunning ? themeFg("warning", "●") : r.exitCode !== 0 ? theme.fg("error", "✗") : theme.fg("success", "✓");
 	const name = markBold(r.agent);
-	const desc = r.agentDescription ? themeFg("dim", ` - ${truncateTask(r.agentDescription, 80)}`) : "";
+	const taskPreview = r.task ? theme.fg("dim", ` - ${truncateTask(r.task, 70)}`) : "";
 
-	// Row 1: agent name - description
-	let line1 = `${icon} ${name}${desc}`;
+	// Row 1: agent name - task intent
+	let line1 = `${icon} ${name}${taskPreview}`;
 
 	// Row 2: tool calls - duration
 	let line2: string;
@@ -1016,7 +1023,7 @@ export default function (pi: ExtensionAPI) {
 						: r.exitCode !== 0
 							? theme.fg("error", "✗")
 							: theme.fg("success", "✓");
-					lines.push(`${icon} ${theme.bold(r.agent)}${r.agentDescription ? theme.fg("dim", ` - ${truncateTask(r.agentDescription, 80)}`) : ""}`);
+					lines.push(`${icon} ${theme.bold(r.agent)}${r.task ? theme.fg("dim", ` - ${truncateTask(r.task, 70)}`) : ""}`);
 					if (stepRunning) {
 						const calls = countToolCalls(r.messages);
 						const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
@@ -1109,7 +1116,7 @@ export default function (pi: ExtensionAPI) {
 						: r.exitCode !== 0
 							? theme.fg("error", "✗")
 							: theme.fg("success", "✓");
-					lines.push(`  ${icon} ${theme.bold(r.agent)}${r.agentDescription ? theme.fg("dim", ` - ${truncateTask(r.agentDescription, 80)}`) : ""}`);
+					lines.push(`  ${icon} ${theme.bold(r.agent)}${r.task ? theme.fg("dim", ` - ${truncateTask(r.task, 70)}`) : ""}`);
 					if (isRunning) {
 						const calls = countToolCalls(r.messages);
 						const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
