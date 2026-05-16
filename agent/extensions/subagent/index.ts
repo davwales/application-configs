@@ -1145,21 +1145,21 @@ export default function (pi: ExtensionAPI) {
 						: r.exitCode !== 0
 							? theme.fg("error", "✗")
 							: theme.fg("success", "✓");
-					lines.push(`  ${icon} ${theme.bold(r.agent)}${r.displayDesc ? theme.fg("dim", ` - ${r.displayDesc}`) : ""}`);
+					lines.push(`${icon} ${theme.bold(r.agent)}${r.displayDesc ? theme.fg("dim", ` - ${r.displayDesc}`) : ""}`);
 					if (isRunning) {
 						const calls = countToolCalls(r.messages);
 						const turnsStr = calls > 0 ? `${calls} turn${calls !== 1 ? "s" : ""}` : "starting";
 						const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
-					lines.push(theme.fg("dim", `    ${turnsStr} - ${formatDuration(stepElapsed)}`));
+					lines.push(theme.fg("dim", `  ${turnsStr} - ${formatDuration(stepElapsed)}`));
 						const preview = getLastActionPreview(r.messages);
-						if (preview) lines.push(theme.fg("muted", `    ${preview}`));
+						if (preview) lines.push(theme.fg("muted", `  ${preview}`));
 					} else {
 						const usage = r.usage;
 						const parts: string[] = [];
 						if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
 						if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
 						if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
-						if (parts.length > 0) lines.push(theme.fg("dim", `    ${parts.join(" ")}`));
+						if (parts.length > 0) lines.push(theme.fg("dim", `  ${parts.join(" ")}`));
 					}
 				}
 				return new Text(lines.join("\n"), 0, 0);
