@@ -203,6 +203,7 @@ interface SingleResult {
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
+	startedAt?: number;
 }
 
 interface SubagentDetails {
@@ -332,6 +333,7 @@ async function runSingleAgent(
 		task,
 		exitCode: -1, // -1 = still running
 		messages: [],
+		startedAt: Date.now(),
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 		model: agent.model,
@@ -530,9 +532,9 @@ function renderCollapsedSingle(
 	let line2: string;
 	if (isRunning) {
 		const calls = toolCalls ?? countToolCalls(r.messages);
-		const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
+		const turnsStr = calls > 0 ? `${calls} turn${calls !== 1 ? "s" : ""}` : "starting";
 		const elapsedStr = elapsed !== undefined ? formatDuration(elapsed) : "";
-		line2 = themeFg("dim", `  ${callsStr} - ${elapsedStr}`);
+		line2 = themeFg("dim", `  ${turnsStr} - ${elapsedStr}`);
 	} else {
 		// Completed: show turns and tokens
 		const usage = r.usage;
@@ -793,6 +795,7 @@ export default function (pi: ExtensionAPI) {
 						task: params.tasks[i].task,
 						exitCode: -1, // -1 = still running
 						messages: [],
+						startedAt: Date.now(),
 						stderr: "",
 						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 					};
@@ -896,7 +899,7 @@ export default function (pi: ExtensionAPI) {
 				const steps = args.chain.map((s: any) => s.agent);
 				const arrow = theme.fg("muted", " → ");
 				let text = theme.fg("toolTitle", "subagent") + " ";
-				text += theme.fg("muted", "chain: ") + theme.fg("accent", steps.join(arrow));
+				text += theme.fg("muted", "chain: ") + steps.map((s: string) => theme.fg("accent", s)).join(arrow);
 				return new Text(text, 0, 0);
 			}
 
@@ -906,13 +909,13 @@ export default function (pi: ExtensionAPI) {
 				let text = theme.fg("toolTitle", "subagent") + " ";
 				text += theme.fg("muted", "parallel: ") + theme.fg("accent", names);
 				const count = args.tasks.length;
-				if (count > 1) text += theme.fg("dim", ` (${count} tasks)`);
+	
 				return new Text(text, 0, 0);
 			}
 
 			// Single agent - just show name, renderResult will show the full layout
 			const agentName = args.agent || "...";
-			let text = theme.fg("muted", "dispatching ") + theme.fg("accent", agentName);
+			let text = theme.fg("toolTitle", "subagent: ") + theme.fg("accent", agentName);
 			return new Text(text, 0, 0);
 		},
 
@@ -952,7 +955,8 @@ export default function (pi: ExtensionAPI) {
 
 				// Collapsed: multi-line opencode-style preview
 				const toolCalls = countToolCalls(r.messages);
-				const lines = renderCollapsedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, toolCalls, isRunning ? elapsed : undefined);
+				const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
+				const lines = renderCollapsedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, toolCalls, isRunning ? stepElapsed : undefined);
 				return new Text(lines, 0, 0);
 			}
 
@@ -988,9 +992,10 @@ export default function (pi: ExtensionAPI) {
 
 						if (isRunning) {
 							const calls = countToolCalls(r.messages);
-							const callsStr = calls > 0 ? ` ${calls} call${calls !== 1 ? "s" : ""}` : "";
-							const elapsedStr = ` ${formatDuration(elapsed)}`;
-							container.addChild(new Text(theme.fg("dim", `${callsStr}${elapsedStr}`), 0, 0));
+							const turnsStr = calls > 0 ? ` ${calls} turn${calls !== 1 ? "s" : ""}` : "";
+							const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
+						const elapsedStr = ` ${formatDuration(stepElapsed)}`;
+							container.addChild(new Text(theme.fg("dim", `${turnsStr}${elapsedStr}`), 0, 0));
 							const preview = getLastActionPreview(r.messages);
 							if (preview) container.addChild(new Text(theme.fg("dim", `  ${preview}`), 0, 0));
 						} else {
@@ -1049,8 +1054,9 @@ export default function (pi: ExtensionAPI) {
 					lines.push(`${icon} ${theme.bold(r.agent)}${r.displayDesc ? theme.fg("dim", ` - ${r.displayDesc}`) : ""}`);
 					if (stepRunning) {
 						const calls = countToolCalls(r.messages);
-						const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
-						lines.push(theme.fg("dim", `  ${callsStr} - ${formatDuration(elapsed)}`));
+						const turnsStr = calls > 0 ? `${calls} turn${calls !== 1 ? "s" : ""}` : "starting";
+						const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
+					lines.push(theme.fg("dim", `  ${turnsStr} - ${formatDuration(stepElapsed)}`));
 						const preview = getLastActionPreview(r.messages);
 						if (preview) lines.push(theme.fg("muted", `  ${preview}`));
 					} else {
@@ -1131,7 +1137,7 @@ export default function (pi: ExtensionAPI) {
 
 				// Collapsed parallel: multi-line per agent
 				const lines: string[] = [];
-				lines.push(running > 0 ? theme.fg("warning", "parallel: ") + theme.fg("accent", `${details.results.length} tasks`) : theme.fg("muted", "parallel: ") + theme.fg("accent", `${details.results.filter(r => r.exitCode === 0).length}/${details.results.length} done`));
+				
 				for (const r of details.results) {
 					const isRunning = isPartial || r.exitCode === -1;
 					const icon = isRunning
@@ -1142,8 +1148,9 @@ export default function (pi: ExtensionAPI) {
 					lines.push(`  ${icon} ${theme.bold(r.agent)}${r.displayDesc ? theme.fg("dim", ` - ${r.displayDesc}`) : ""}`);
 					if (isRunning) {
 						const calls = countToolCalls(r.messages);
-						const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
-						lines.push(theme.fg("dim", `    ${callsStr} - ${formatDuration(elapsed)}`));
+						const turnsStr = calls > 0 ? `${calls} turn${calls !== 1 ? "s" : ""}` : "starting";
+						const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
+					lines.push(theme.fg("dim", `    ${turnsStr} - ${formatDuration(stepElapsed)}`));
 						const preview = getLastActionPreview(r.messages);
 						if (preview) lines.push(theme.fg("muted", `    ${preview}`));
 					} else {
