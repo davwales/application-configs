@@ -191,6 +191,7 @@ interface UsageStats {
 
 interface SingleResult {
 	agent: string;
+	agentDescription: string;
 	agentSource: "user" | "project" | "unknown";
 	task: string;
 	exitCode: number;
@@ -302,6 +303,7 @@ async function runSingleAgent(
 		const available = agents.map((a) => `"${a.name}"`).join(", ") || "none";
 		return {
 			agent: agentName,
+			agentDescription: agent?.description || "",
 			agentSource: "unknown",
 			task,
 			exitCode: 1,
@@ -321,6 +323,7 @@ async function runSingleAgent(
 
 	const currentResult: SingleResult = {
 		agent: agentName,
+		agentDescription: agent.description,
 		agentSource: agent.source,
 		task,
 		exitCode: 0,
@@ -504,11 +507,10 @@ function renderCollapsedSingle(
 ): string {
 	const icon = isRunning ? themeFg("warning", "●") : r.exitCode !== 0 ? themeFg("error", "✗") : themeFg("success", "✓");
 	const name = markBold(r.agent);
-	const taskPreview = truncateTask(r.task);
+	const desc = r.agentDescription ? themeFg("dim", ` - ${truncateTask(r.agentDescription, 80)}`) : "";
 
-	// Row 1: agent name - task description
-	let line1 = `${icon} ${name}`;
-	if (taskPreview) line1 += themeFg("dim", ` - ${taskPreview}`);
+	// Row 1: agent name - description
+	let line1 = `${icon} ${name}${desc}`;
 
 	// Row 2: tool calls - duration
 	let line2: string;
@@ -888,15 +890,9 @@ export default function (pi: ExtensionAPI) {
 				return new Text(text, 0, 0);
 			}
 
-			// Single agent
+			// Single agent - just show name, renderResult will show the full layout
 			const agentName = args.agent || "...";
-			const taskPreview = args.task
-				? args.task.length > 60
-					? `${args.task.slice(0, 60)}...`
-					: args.task
-				: "";
-			let text = theme.fg("accent", agentName);
-			if (taskPreview) text += `  ${theme.fg("dim", taskPreview)}`;
+			let text = theme.fg("muted", "dispatching ") + theme.fg("accent", agentName);
 			return new Text(text, 0, 0);
 		},
 
@@ -1020,7 +1016,7 @@ export default function (pi: ExtensionAPI) {
 						: r.exitCode !== 0
 							? theme.fg("error", "✗")
 							: theme.fg("success", "✓");
-					lines.push(`${icon} ${theme.bold(r.agent)}${theme.fg("dim", ` - ${truncateTask(r.task)}`)}`);
+					lines.push(`${icon} ${theme.bold(r.agent)}${r.agentDescription ? theme.fg("dim", ` - ${truncateTask(r.agentDescription, 80)}`) : ""}`);
 					if (stepRunning) {
 						const calls = countToolCalls(r.messages);
 						const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
@@ -1113,7 +1109,7 @@ export default function (pi: ExtensionAPI) {
 						: r.exitCode !== 0
 							? theme.fg("error", "✗")
 							: theme.fg("success", "✓");
-					lines.push(`  ${icon} ${theme.bold(r.agent)}${theme.fg("dim", ` - ${truncateTask(r.task)}`)}`);
+					lines.push(`  ${icon} ${theme.bold(r.agent)}${r.agentDescription ? theme.fg("dim", ` - ${truncateTask(r.agentDescription, 80)}`) : ""}`);
 					if (isRunning) {
 						const calls = countToolCalls(r.messages);
 						const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
