@@ -915,10 +915,13 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		renderResult(result, { expanded, isPartial }, theme, context) {
+			try {
 			const details = result.details as SubagentDetails | undefined;
 			if (!details || details.results.length === 0) {
+				// Debug: show what we actually got
 				const text = result.content[0];
-				return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
+				const debugInfo = `no details (mode=${details?.mode}, results=${details?.results?.length ?? 0})`;
+				return new Text(text?.type === "text" ? `${text.text}\n[${debugInfo}]` : "(no output)", 0, 0);
 			}
 
 			// Track start time for duration display
