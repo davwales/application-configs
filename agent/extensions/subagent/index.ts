@@ -577,8 +577,9 @@ function renderCollapsedSingle(
 ): string {
 	const lines = renderCollapsedResultLines(r, isRunning, elapsed, themeFg, markBold, { showCost: true });
 
-	// Row 3: latest action
-	const lastAction = getLastActionPreview(r.messages);
+	// Row 3: latest action — only add when not running, because
+	// renderCollapsedResultLines already includes the preview when isRunning.
+	const lastAction = !isRunning ? getLastActionPreview(r.messages) : "";
 	const line3 = lastAction ? themeFg("muted", `  ${lastAction}`) : "";
 
 	// Error display

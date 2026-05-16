@@ -11,7 +11,6 @@
     "npm:@aliou/pi-guardrails",
     "npm:@juicesharp/rpiv-todo",
     "npm:@juicesharp/rpiv-ask-user-question",
-    "npm:@plannotator/pi-extension",
     "npm:pi-powerline-footer"
   ],
   "defaultProvider": "ollama-cloud",
@@ -24,41 +23,41 @@
       "activeNoticeAfterMs": 600000
     },
     "agentOverrides": {
-      "oracle": {
+      "orchestrator": {
         "model": "ollama-cloud/deepseek-v4-pro",
         "thinking": "high"
       },
-      "reviewer": {
-        "model": "ollama-cloud/deepseek-v4-pro",
-        "thinking": "high"
-      },
-      "planner": {
-        "model": "ollama-cloud/deepseek-v4-pro",
-        "thinking": "high"
-      },
-      "worker": {
+      "product-owner": {
         "model": "ollama-cloud/deepseek-v4-flash",
         "thinking": "high"
       },
-      "scout": {
-        "model": "ollama-cloud/minimax-m2.7",
-        "thinking": "low"
+      "architect": {
+        "model": "ollama-cloud/deepseek-v4-pro",
+        "thinking": "high"
       },
       "researcher": {
-        "model": "ollama-cloud/minimax-m2.7",
-        "thinking": "low"
-      },
-      "context-builder": {
-        "model": "ollama-cloud/minimax-m2.7",
-        "thinking": "medium"
-      },
-      "delegate": {
-        "model": "ollama-cloud/minimax-m2.7",
+        "model": "ollama-cloud/deepseek-v4-flash",
         "thinking": "low"
       },
       "designer": {
         "model": "ollama-cloud/kimi-k2.6",
         "thinking": "medium"
+      },
+      "scout": {
+        "model": "ollama-cloud/minimax-m2.7",
+        "thinking": "low"
+      },
+      "frontend-developer": {
+        "model": "ollama-cloud/kimi-k2.6",
+        "thinking": "high"
+      },
+      "backend-developer": {
+        "model": "ollama-cloud/glm-5.1",
+        "thinking": "high"
+      },
+      "reviewer": {
+        "model": "ollama-cloud/deepseek-v4-pro",
+        "thinking": "high"
       }
     }
   },
