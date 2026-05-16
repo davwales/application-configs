@@ -157,6 +157,28 @@ function getLastActionPreview(messages: Message[]): string {
 	return "";
 }
 
+function countToolCalls(messages: Message[]): number {
+	let count = 0;
+	for (const msg of messages) {
+		if (msg.role === "assistant") {
+			for (const part of msg.content) {
+				if (part.type === "toolCall") count++;
+			}
+		}
+	}
+	return count;
+}
+
+function formatDuration(seconds: number): string {
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	const secs = seconds % 60;
+	if (minutes < 60) return `${minutes}m ${secs}s`;
+	const hours = Math.floor(minutes / 60);
+	const mins = minutes % 60;
+	return `${hours}h ${mins}m`;
+}
+
 interface UsageStats {
 	input: number;
 	output: number;
@@ -466,6 +488,8 @@ function renderCollapsedSingle(
 	themeFg: (color: any, text: string) => string,
 	markBold: (text: string) => string,
 	isRunning: boolean,
+	toolCalls?: number,
+	elapsed?: number,
 ): string {
 	const icon = isRunning ? "●" : r.exitCode !== 0 ? themeFg("error", "✗") : themeFg("success", "✓");
 	const name = markBold(r.agent);
@@ -473,9 +497,10 @@ function renderCollapsedSingle(
 	const errMsg = isRunning ? "" : r.errorMessage ? ` ${themeFg("error", r.errorMessage.slice(0, 50))}` : "";
 
 	if (isRunning) {
-		// Show last action
+		const callsStr = toolCalls !== undefined && toolCalls > 0 ? ` ${toolCalls} call${toolCalls !== 1 ? "s" : ""}` : "";
+		const elapsedStr = elapsed !== undefined ? ` ${formatDuration(elapsed)}` : "";
 		const lastAction = getLastActionPreview(r.messages);
-		return `${icon} ${name}${lastAction ? `  ${themeFg("dim", lastAction)}` : ""}`;
+		return `${icon} ${name}${callsStr}${elapsedStr}${lastAction ? `  ${themeFg("dim", lastAction)}` : ""}`;
 	}
 
 	// Show completion status + usage
@@ -822,8 +847,7 @@ export default function (pi: ExtensionAPI) {
 			if (args.chain && args.chain.length > 0) {
 				const steps = args.chain.map((s: any) => s.agent);
 				const arrow = theme.fg("muted", " → ");
-				let text = theme.fg("warning", "●") + " ";
-				text += theme.fg("toolTitle", "subagent") + " ";
+				let text = theme.fg("toolTitle", "subagent") + " ";
 				text += theme.fg("muted", "chain: ") + theme.fg("accent", steps.join(arrow));
 				return new Text(text, 0, 0);
 			}
@@ -831,8 +855,7 @@ export default function (pi: ExtensionAPI) {
 			// Parallel mode
 			if (args.tasks && args.tasks.length > 0) {
 				const names = args.tasks.map((t: any) => t.agent).join(", ");
-				let text = theme.fg("warning", "●") + " ";
-				text += theme.fg("toolTitle", "subagent") + " ";
+				let text = theme.fg("toolTitle", "subagent") + " ";
 				text += theme.fg("muted", "parallel: ") + theme.fg("accent", names);
 				const count = args.tasks.length;
 				if (count > 1) text += theme.fg("dim", ` (${count} tasks)`);
@@ -846,18 +869,23 @@ export default function (pi: ExtensionAPI) {
 					? `${args.task.slice(0, 60)}...`
 					: args.task
 				: "";
-			let text = theme.fg("warning", "●") + " ";
-			text += theme.fg("accent", agentName);
+			let text = theme.fg("accent", agentName);
 			if (taskPreview) text += `  ${theme.fg("dim", taskPreview)}`;
 			return new Text(text, 0, 0);
 		},
 
-		renderResult(result, { expanded, isPartial }, theme, _context) {
+		renderResult(result, { expanded, isPartial }, theme, context) {
 			const details = result.details as SubagentDetails | undefined;
 			if (!details || details.results.length === 0) {
 				const text = result.content[0];
 				return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
 			}
+
+			// Track start time for duration display
+			if (!context.state.startTime) {
+				context.state.startTime = Date.now();
+			}
+			const elapsed = Math.round((Date.now() - context.state.startTime) / 1000);
 
 			const mdTheme = getMarkdownTheme();
 
@@ -870,8 +898,9 @@ export default function (pi: ExtensionAPI) {
 					return renderExpandedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, mdTheme);
 				}
 
-				// Collapsed: one-liner preview
-				const line = renderCollapsedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning);
+				// Collapsed: one-liner preview with tool calls count and elapsed time while running
+				const toolCalls = countToolCalls(r.messages);
+				const line = renderCollapsedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, toolCalls, isRunning ? elapsed : undefined);
 				return new Text(line, 0, 0);
 			}
 
@@ -906,6 +935,10 @@ export default function (pi: ExtensionAPI) {
 						);
 
 						if (isRunning) {
+							const calls = countToolCalls(r.messages);
+							const callsStr = calls > 0 ? ` ${calls} call${calls !== 1 ? "s" : ""}` : "";
+							const elapsedStr = ` ${formatDuration(elapsed)}`;
+							container.addChild(new Text(theme.fg("dim", `${callsStr}${elapsedStr}`), 0, 0));
 							const preview = getLastActionPreview(r.messages);
 							if (preview) container.addChild(new Text(theme.fg("dim", `  ${preview}`), 0, 0));
 						} else {
@@ -965,7 +998,11 @@ export default function (pi: ExtensionAPI) {
 					text += `${icon} ${r.agent}`;
 
 					if (isRunning) {
+						const calls = countToolCalls(r.messages);
+						const callsStr = calls > 0 ? ` ${calls} call${calls !== 1 ? "s" : ""}` : "";
+						const elapsedStr = ` ${formatDuration(elapsed)}`;
 						const preview = getLastActionPreview(r.messages);
+						text += `${callsStr}${elapsedStr}`;
 						if (preview) text += ` ${theme.fg("dim", preview)}`;
 					}
 				}
@@ -1045,7 +1082,13 @@ export default function (pi: ExtensionAPI) {
 							: r.exitCode !== 0
 								? theme.fg("error", "✗")
 								: theme.fg("success", "✓");
-						return `${icon} ${r.agent}`;
+						let entry = `${icon} ${r.agent}`;
+						if (isRunning) {
+							const calls = countToolCalls(r.messages);
+							if (calls > 0) entry += ` ${calls} call${calls !== 1 ? "s" : ""}`;
+							entry += ` ${formatDuration(elapsed)}`;
+						}
+						return entry;
 					})
 					.join("  ");
 				return new Text(
