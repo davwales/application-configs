@@ -330,7 +330,7 @@ async function runSingleAgent(
 		displayDesc: displayDesc || truncateTask(task, 70),
 		agentSource: agent.source,
 		task,
-		exitCode: 0,
+		exitCode: -1, // -1 = still running
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
