@@ -856,6 +856,7 @@ export default function (pi: ExtensionAPI) {
 					agents,
 					params.agent,
 					params.task,
+					params.desc || truncateTask(params.task || "", 70),
 					params.cwd,
 					undefined,
 					signal,
