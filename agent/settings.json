@@ -2,7 +2,6 @@
   "lastChangelogVersion": "0.74.0",
   "packages": [
     "npm:pi-ollama-cloud",
-    "npm:pi-subagents",
     "npm:@ifi/oh-pi-themes",
     "npm:pi-simplify",
     "npm:pi-compass",
