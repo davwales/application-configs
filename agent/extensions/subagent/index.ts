@@ -519,9 +519,9 @@ function renderCollapsedSingle(
 	toolCalls?: number,
 	elapsed?: number,
 ): string {
-	const icon = isRunning ? themeFg("warning", "●") : r.exitCode !== 0 ? theme.fg("error", "✗") : theme.fg("success", "✓");
+	const icon = isRunning ? themeFg("warning", "●") : r.exitCode !== 0 ? themeFg("error", "✗") : themeFg("success", "✓");
 	const name = markBold(r.agent);
-	const taskPreview = r.displayDesc ? theme.fg("dim", ` - ${r.displayDesc}`) : "";
+	const taskPreview = r.displayDesc ? themeFg("dim", ` - ${r.displayDesc}`) : "";
 
 	// Row 1: agent name - task intent
 	let line1 = `${icon} ${name}${taskPreview}`;
