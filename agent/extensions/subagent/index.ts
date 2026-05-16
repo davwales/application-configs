@@ -1151,6 +1151,10 @@ export default function (pi: ExtensionAPI) {
 
 			const text = result.content[0];
 			return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
+		} catch (e) {
+			// If renderResult throws, show the error instead of crashing
+			return new Text(`[subagent render error: ${e instanceof Error ? e.message : String(e)}]`, 0, 0);
+		}
 		},
 	});
 }
