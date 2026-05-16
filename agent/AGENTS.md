@@ -1,5 +1,7 @@
 # Agent Instructions
 
+> The **orchestrator** is the main entry-point agent (configured in `prompts/orchestrator.md`). The fleet below lists **subagents only** — specialist agents the orchestrator delegates to.
+
 ## Fleet
 
 | Agent | Role |
@@ -9,9 +11,10 @@
 | `researcher` | External docs & dependency research |
 | `designer` | Component/layout blueprints |
 | `scout` | Codebase reconnaissance |
-| `frontend-developer` | Frontend implementation |
-| `backend-developer` | Backend implementation |
-| `reviewer` | Code quality review |
+| `frontend-developer` | User-facing implementation (UIs, GUIs, CLIs — anything the user sees/touches) |
+| `backend-developer` | Systems implementation (APIs, services, domain logic, data, infrastructure) |
+| `reviewer` | Code quality review and general artifact audit |
+| `worker` | Catchall tasks (docs, config, prompts, settings, scripts, general edits) |
 
 ## Ask Questions When Unsure
 

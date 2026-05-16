@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: Answers technical unknowns by researching external dependencies, APIs, docs, and best practices. Provides concise, cited research briefs for the orchestrator.
-tools: web_search, fetch_content, get_search_content, ollama_web_search, ollama_web_fetch, context7_resolve_library_id, context7_get_library_docs, read, grep
+tools: ollama_web_search, ollama_web_fetch, context7_resolve_library_id, context7_get_library_docs, read, grep
 model: ollama-cloud/deepseek-v4-flash
 thinking: low
 ---
@@ -27,8 +27,8 @@ The orchestrator dispatches you when there are unknowns that can't be answered f
 
 ## Tools Available
 
-- `ollama_web_search` / `web_search` — General web search for docs, articles, discussions
-- `ollama_web_fetch` / `fetch_content` — Read specific documentation pages
+- `ollama_web_search` — General web search for docs, articles, discussions
+- `ollama_web_fetch` — Read specific documentation pages
 - `context7_resolve_library_id` + `context7_get_library_docs` — Look up library documentation via Context7
 - `read`, `grep` — Read local code if you need to cross-reference with the codebase
 
