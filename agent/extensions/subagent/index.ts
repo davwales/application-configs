@@ -192,6 +192,7 @@ interface UsageStats {
 interface SingleResult {
 	agent: string;
 	agentDescription: string;
+	displayDesc: string;
 	agentSource: "user" | "project" | "unknown";
 	task: string;
 	exitCode: number;
@@ -291,6 +292,7 @@ async function runSingleAgent(
 	agents: AgentConfig[],
 	agentName: string,
 	task: string,
+	displayDesc: string,
 	cwd: string | undefined,
 	step: number | undefined,
 	signal: AbortSignal | undefined,
@@ -304,6 +306,7 @@ async function runSingleAgent(
 		return {
 			agent: agentName,
 			agentDescription: agent?.description || "",
+			displayDesc: "",
 			agentSource: "unknown",
 			task,
 			exitCode: 1,
@@ -324,6 +327,7 @@ async function runSingleAgent(
 	const currentResult: SingleResult = {
 		agent: agentName,
 		agentDescription: agent.description,
+		displayDesc: displayDesc || truncateTask(task, 70),
 		agentSource: agent.source,
 		task,
 		exitCode: 0,
@@ -457,12 +461,14 @@ async function runSingleAgent(
 const TaskItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task to delegate to the agent" }),
+	desc: Type.Optional(Type.String({ description: "Short one-line intent summary" })),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 });
 
 const ChainItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
+	desc: Type.Optional(Type.String({ description: "Short one-line intent summary" })),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 });
 
@@ -474,6 +480,7 @@ const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
 const SubagentParams = Type.Object({
 	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
+	desc: Type.Optional(Type.String({ description: "Short one-line intent summary of what this subagent call should accomplish. Keep it under 10 words. Example: 'Check auth middleware' or 'Implement unit tests for UserService'. Always provide this." })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
 	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential execution" })),
 	agentScope: Type.Optional(AgentScopeSchema),
@@ -514,7 +521,7 @@ function renderCollapsedSingle(
 ): string {
 	const icon = isRunning ? themeFg("warning", "●") : r.exitCode !== 0 ? theme.fg("error", "✗") : theme.fg("success", "✓");
 	const name = markBold(r.agent);
-	const taskPreview = r.task ? theme.fg("dim", ` - ${truncateTask(r.task, 70)}`) : "";
+	const taskPreview = r.displayDesc ? theme.fg("dim", ` - ${r.displayDesc}`) : "";
 
 	// Row 1: agent name - task intent
 	let line1 = `${icon} ${name}${taskPreview}`;
@@ -636,6 +643,7 @@ export default function (pi: ExtensionAPI) {
 		description: [
 			"Delegate tasks to specialized subagents with isolated context.",
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
+			"Always provide 'desc' with a short one-line intent summary (under 10 words) for what this call should accomplish.",
 			'Default agent scope is "user" (from ~/.pi/agent/agents).',
 			'To enable project-local agents in .pi/agents, set agentScope: "both" (or "project").',
 		].join(" "),
@@ -732,6 +740,7 @@ export default function (pi: ExtensionAPI) {
 						agents,
 						step.agent,
 						taskWithContext,
+						step.desc || truncateTask(taskWithContext, 70),
 						step.cwd,
 						i + 1,
 						signal,
@@ -806,6 +815,7 @@ export default function (pi: ExtensionAPI) {
 						agents,
 						t.agent,
 						t.task,
+						t.desc || truncateTask(t.task, 70),
 						t.cwd,
 						undefined,
 						signal,
@@ -899,7 +909,8 @@ export default function (pi: ExtensionAPI) {
 
 			// Single agent - just show name, renderResult will show the full layout
 			const agentName = args.agent || "...";
-			let text = theme.fg("muted", "dispatching ") + theme.fg("accent", agentName);
+			const desc = args.desc ? theme.fg("dim", ` - ${args.desc}`) : "";
+			let text = theme.fg("muted", "dispatching ") + theme.fg("accent", agentName) + desc;
 			return new Text(text, 0, 0);
 		},
 
@@ -1023,7 +1034,7 @@ export default function (pi: ExtensionAPI) {
 						: r.exitCode !== 0
 							? theme.fg("error", "✗")
 							: theme.fg("success", "✓");
-					lines.push(`${icon} ${theme.bold(r.agent)}${r.task ? theme.fg("dim", ` - ${truncateTask(r.task, 70)}`) : ""}`);
+					lines.push(`${icon} ${theme.bold(r.agent)}${r.displayDesc ? theme.fg("dim", ` - ${r.displayDesc}`) : ""}`);
 					if (stepRunning) {
 						const calls = countToolCalls(r.messages);
 						const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
@@ -1116,7 +1127,7 @@ export default function (pi: ExtensionAPI) {
 						: r.exitCode !== 0
 							? theme.fg("error", "✗")
 							: theme.fg("success", "✓");
-					lines.push(`  ${icon} ${theme.bold(r.agent)}${r.task ? theme.fg("dim", ` - ${truncateTask(r.task, 70)}`) : ""}`);
+					lines.push(`  ${icon} ${theme.bold(r.agent)}${r.displayDesc ? theme.fg("dim", ` - ${r.displayDesc}`) : ""}`);
 					if (isRunning) {
 						const calls = countToolCalls(r.messages);
 						const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
