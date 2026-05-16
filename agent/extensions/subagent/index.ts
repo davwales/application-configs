@@ -482,7 +482,18 @@ const SubagentParams = Type.Object({
 
 // ─── Render helpers ────────────────────────────────────────────────────────────
 
-/** Build the one-line collapsed preview for a single agent result */
+/** Truncate a task string for display */
+function truncateTask(task: string, maxLen: number = 60): string {
+	const trimmed = task.replace(/\s+/g, " ").trim();
+	return trimmed.length > maxLen ? `${trimmed.slice(0, maxLen)}...` : trimmed;
+}
+
+/** Build the collapsed preview for a single agent result (multi-line, opencode-style)
+ *
+ *  Row 1: ✓ scout - Read the auth module
+ *  Row 2:   3 calls - 12s
+ *  Row 3:   read src/auth/login.ts:1-50
+ */
 function renderCollapsedSingle(
 	r: SingleResult,
 	themeFg: (color: any, text: string) => string,
@@ -491,31 +502,46 @@ function renderCollapsedSingle(
 	toolCalls?: number,
 	elapsed?: number,
 ): string {
-	const icon = isRunning ? "●" : r.exitCode !== 0 ? themeFg("error", "✗") : themeFg("success", "✓");
+	const icon = isRunning ? themeFg("warning", "●") : r.exitCode !== 0 ? themeFg("error", "✗") : themeFg("success", "✓");
 	const name = markBold(r.agent);
-	const errSuffix = isRunning ? "" : r.stopReason === "error" || r.stopReason === "aborted" ? ` ${themeFg("error", `[${r.stopReason}]`)}` : "";
-	const errMsg = isRunning ? "" : r.errorMessage ? ` ${themeFg("error", r.errorMessage.slice(0, 50))}` : "";
+	const taskPreview = truncateTask(r.task);
 
+	// Row 1: agent name - task description
+	let line1 = `${icon} ${name}`;
+	if (taskPreview) line1 += themeFg("dim", ` - ${taskPreview}`);
+
+	// Row 2: tool calls - duration
+	let line2: string;
 	if (isRunning) {
-		const callsStr = toolCalls !== undefined && toolCalls > 0 ? ` ${toolCalls} call${toolCalls !== 1 ? "s" : ""}` : "";
-		const elapsedStr = elapsed !== undefined ? ` ${formatDuration(elapsed)}` : "";
-		const lastAction = getLastActionPreview(r.messages);
-		return `${icon} ${name}${callsStr}${elapsedStr}${lastAction ? `  ${themeFg("dim", lastAction)}` : ""}`;
+		const calls = toolCalls ?? countToolCalls(r.messages);
+		const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
+		const elapsedStr = elapsed !== undefined ? formatDuration(elapsed) : "";
+		line2 = themeFg("dim", `  ${callsStr} - ${elapsedStr}`);
+	} else {
+		// Completed: show turns and tokens
+		const usage = r.usage;
+		const parts: string[] = [];
+		if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
+		if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
+		if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
+		if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
+		line2 = parts.length > 0 ? themeFg("dim", `  ${parts.join(" ")}`) : "";
 	}
 
-	// Show completion status + usage
-	if (r.exitCode !== 0) {
-		return `${icon} ${name}${errSuffix}${errMsg}`;
+	// Row 3: latest action
+	const lastAction = getLastActionPreview(r.messages);
+	const line3 = lastAction ? themeFg("muted", `  ${lastAction}`) : "";
+
+	// Error display
+	if (!isRunning && r.exitCode !== 0) {
+		if (r.stopReason) line1 += themeFg("error", ` [${r.stopReason}]`);
+		if (r.errorMessage) line2 = themeFg("error", `  ${r.errorMessage.slice(0, 80)}`);
 	}
 
-	const usage = r.usage;
-	const usageParts: string[] = [];
-	if (usage.turns) usageParts.push(`${usage.turns} turns`);
-	if (usage.input) usageParts.push(`↑${formatTokens(usage.input)}`);
-	if (usage.output) usageParts.push(`↓${formatTokens(usage.output)}`);
-	const usageStr = usageParts.length > 0 ? `  ${themeFg("dim", usageParts.join(" "))}` : "";
-
-	return `${icon} ${name}${usageStr}`;
+	const lines = [line1];
+	if (line2) lines.push(line2);
+	if (line3) lines.push(line3);
+	return lines.join("\n");
 }
 
 /** Build a container for the expanded single agent conversation view */
@@ -898,10 +924,10 @@ export default function (pi: ExtensionAPI) {
 					return renderExpandedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, mdTheme);
 				}
 
-				// Collapsed: one-liner preview with tool calls count and elapsed time while running
+				// Collapsed: multi-line opencode-style preview
 				const toolCalls = countToolCalls(r.messages);
-				const line = renderCollapsedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, toolCalls, isRunning ? elapsed : undefined);
-				return new Text(line, 0, 0);
+				const lines = renderCollapsedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, toolCalls, isRunning ? elapsed : undefined);
+				return new Text(lines, 0, 0);
 			}
 
 			// ── Chain mode ─────────────────────────────────────────────────────
@@ -985,28 +1011,32 @@ export default function (pi: ExtensionAPI) {
 					return container;
 				}
 
-				// Collapsed chain: one line per step
-				let text = "";
+				// Collapsed chain: multi-line per step
+				const lines: string[] = [];
 				for (const r of details.results) {
-					const isRunning = isPartial && r.exitCode === -1;
-					const icon = isRunning
+					const stepRunning = isPartial && r.exitCode === -1;
+					const icon = stepRunning
 						? theme.fg("warning", "●")
 						: r.exitCode !== 0
 							? theme.fg("error", "✗")
 							: theme.fg("success", "✓");
-					if (text) text += "  ";
-					text += `${icon} ${r.agent}`;
-
-					if (isRunning) {
+					lines.push(`${icon} ${theme.bold(r.agent)}${theme.fg("dim", ` - ${truncateTask(r.task)}`)}`);
+					if (stepRunning) {
 						const calls = countToolCalls(r.messages);
-						const callsStr = calls > 0 ? ` ${calls} call${calls !== 1 ? "s" : ""}` : "";
-						const elapsedStr = ` ${formatDuration(elapsed)}`;
+						const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
+						lines.push(theme.fg("dim", `  ${callsStr} - ${formatDuration(elapsed)}`));
 						const preview = getLastActionPreview(r.messages);
-						text += `${callsStr}${elapsedStr}`;
-						if (preview) text += ` ${theme.fg("dim", preview)}`;
+						if (preview) lines.push(theme.fg("muted", `  ${preview}`));
+					} else {
+						const usage = r.usage;
+						const parts: string[] = [];
+						if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
+						if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
+						if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
+						if (parts.length > 0) lines.push(theme.fg("dim", `  ${parts.join(" ")}`));
 					}
 				}
-				return new Text(text, 0, 0);
+				return new Text(lines.join("\n"), 0, 0);
 			}
 
 			// ── Parallel mode ──────────────────────────────────────────────────
@@ -1073,29 +1103,33 @@ export default function (pi: ExtensionAPI) {
 					return container;
 				}
 
-				// Collapsed parallel: inline status per agent
-				const line = details.results
-					.map((r) => {
-						const isRunning = r.exitCode === -1;
-						const icon = isRunning
-							? theme.fg("warning", "●")
-							: r.exitCode !== 0
-								? theme.fg("error", "✗")
-								: theme.fg("success", "✓");
-						let entry = `${icon} ${r.agent}`;
-						if (isRunning) {
-							const calls = countToolCalls(r.messages);
-							if (calls > 0) entry += ` ${calls} call${calls !== 1 ? "s" : ""}`;
-							entry += ` ${formatDuration(elapsed)}`;
-						}
-						return entry;
-					})
-					.join("  ");
-				return new Text(
-					(running > 0 ? theme.fg("warning", "parallel: ") : theme.fg("muted", "parallel: ")) + line,
-					0,
-					0,
-				);
+				// Collapsed parallel: multi-line per agent
+				const lines: string[] = [];
+				lines.push(running > 0 ? theme.fg("warning", "parallel: ") + theme.fg("accent", `${details.results.length} tasks`) : theme.fg("muted", "parallel: ") + theme.fg("accent", `${details.results.filter(r => r.exitCode === 0).length}/${details.results.length} done`));
+				for (const r of details.results) {
+					const isRunning = r.exitCode === -1;
+					const icon = isRunning
+						? theme.fg("warning", "●")
+						: r.exitCode !== 0
+							? theme.fg("error", "✗")
+							: theme.fg("success", "✓");
+					lines.push(`  ${icon} ${theme.bold(r.agent)}${theme.fg("dim", ` - ${truncateTask(r.task)}`)}`);
+					if (isRunning) {
+						const calls = countToolCalls(r.messages);
+						const callsStr = calls > 0 ? `${calls} call${calls !== 1 ? "s" : ""}` : "starting";
+						lines.push(theme.fg("dim", `    ${callsStr} - ${formatDuration(elapsed)}`));
+						const preview = getLastActionPreview(r.messages);
+						if (preview) lines.push(theme.fg("muted", `    ${preview}`));
+					} else {
+						const usage = r.usage;
+						const parts: string[] = [];
+						if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
+						if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
+						if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
+						if (parts.length > 0) lines.push(theme.fg("dim", `    ${parts.join(" ")}`));
+					}
+				}
+				return new Text(lines.join("\n"), 0, 0);
 			}
 
 			const text = result.content[0];
