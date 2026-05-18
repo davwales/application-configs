@@ -229,7 +229,7 @@ function getFinalOutput(messages: Message[]): string {
 	return "";
 }
 
-type DisplayItem = { type: "text"; text: string } | { type: "toolCall"; name: string; args: Record<string, any> };
+type DisplayItem = { type: "text"; text: string } | { type: "toolCall"; name: string; args: Record<string, any> } | { type: "thinking"; text: string };
 
 function getDisplayItems(messages: Message[]): DisplayItem[] {
 	const items: DisplayItem[] = [];
@@ -238,6 +238,7 @@ function getDisplayItems(messages: Message[]): DisplayItem[] {
 			for (const part of msg.content) {
 				if (part.type === "text") items.push({ type: "text", text: part.text });
 				else if (part.type === "toolCall") items.push({ type: "toolCall", name: part.name, args: part.arguments });
+				else if (part.type === "thinking") items.push({ type: "thinking", text: part.thinking || part.text || "" });
 			}
 		}
 	}
@@ -619,7 +620,7 @@ function renderExpandedSingle(
 	if (r.errorMessage)
 		container.addChild(new Text(themeFg("error", `  ${r.errorMessage}`), 0, 0));
 
-	const items = getDisplayItems(r.messages);
+	const items = getDisplayItems(r.messages || []);
 	if (items.length === 0 && !isRunning) {
 		const output = getFinalOutput(r.messages);
 		if (output) {
@@ -631,12 +632,24 @@ function renderExpandedSingle(
 		return container;
 	}
 
+	// Show the task as the first entry in the conversation
+	if (r.task) {
+		container.addChild(new Spacer(1));
+		container.addChild(new Text(themeFg("muted", "─── Task ───"), 0, 0));
+		container.addChild(new Markdown(r.task.trim(), 0, 0, mdTheme));
+	}
+
 	// Show the full conversation: tool calls AND text responses interleaved
 	let turnCount = 0;
 	let currentTurnText = "";
 
 	for (const item of items) {
-		if (item.type === "toolCall") {
+		if (item.type === "thinking") {
+			// Show thinking content dimmed and truncated before associated tool call
+			const truncated = item.text.length > 200 ? item.text.slice(0, 200) + "..." : item.text;
+			container.addChild(new Text(themeFg("dim", "  ── Thinking ──"), 0, 0));
+			container.addChild(new Text(themeFg("dim", `  ${truncated}`), 0, 0));
+		} else if (item.type === "toolCall") {
 			// Start a new turn on first tool call
 			if (currentTurnText) {
 				turnCount++;
@@ -1018,6 +1031,13 @@ export default function (pi: ExtensionAPI) {
 								),
 							);
 
+							// Show the task for this chain step
+							if (r.task) {
+								container.addChild(new Spacer(1));
+								container.addChild(new Text(theme.fg("muted", "  ─── Task ───"), 0, 0));
+								container.addChild(new Markdown(r.task.trim(), 0, 0, mdTheme));
+							}
+
 							if (isRunning) {
 								const calls = countToolCalls(r.messages);
 								const turnsStr = calls > 0 ? ` ${calls} turn${calls !== 1 ? "s" : ""}` : "";
@@ -1028,10 +1048,14 @@ export default function (pi: ExtensionAPI) {
 								if (preview) container.addChild(new Text(theme.fg("dim", `  ${preview}`), 0, 0));
 							} else {
 								// Show conversation turns
-								const items = getDisplayItems(r.messages);
+								const items = getDisplayItems(r.messages || []);
 								let turnCount = 0;
 								for (const item of items) {
-									if (item.type === "toolCall") {
+									if (item.type === "thinking") {
+										const truncated = item.text.length > 200 ? item.text.slice(0, 200) + "..." : item.text;
+										container.addChild(new Text(theme.fg("dim", "  ── Thinking ──"), 0, 0));
+										container.addChild(new Text(theme.fg("dim", `  ${truncated}`), 0, 0));
+									} else if (item.type === "toolCall") {
 										turnCount++;
 										container.addChild(
 											new Text(
@@ -1093,11 +1117,22 @@ export default function (pi: ExtensionAPI) {
 								new Text(`${theme.fg("muted", `─── ${rIcon} `)}${theme.fg("accent", r.agent)}`, 0, 0),
 							);
 
+							// Show the task for this parallel task
+							if (r.task) {
+								container.addChild(new Spacer(1));
+								container.addChild(new Text(theme.fg("muted", "  ─── Task ───"), 0, 0));
+								container.addChild(new Markdown(r.task.trim(), 0, 0, mdTheme));
+							}
+
 							// Show conversation turns
-							const items = getDisplayItems(r.messages);
+							const items = getDisplayItems(r.messages || []);
 							let turnCount = 0;
 							for (const item of items) {
-								if (item.type === "toolCall") {
+								if (item.type === "thinking") {
+									const truncated = item.text.length > 200 ? item.text.slice(0, 200) + "..." : item.text;
+									container.addChild(new Text(theme.fg("dim", "  ── Thinking ──"), 0, 0));
+									container.addChild(new Text(theme.fg("dim", `  ${truncated}`), 0, 0));
+								} else if (item.type === "toolCall") {
 									turnCount++;
 									container.addChild(
 										new Text(
