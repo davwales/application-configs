@@ -1,5 +1,5 @@
 Continue.continue: '{"hasBeenInstalled":true}'
-ms-dotnettools.vscode-dotnet-runtime: '{"installed":[],"dotnet.returnedInstallDirectories":{"session-767463b98c":["/usr/lib64/dotnet/dotnet"],"session-49d4c4ad81":["/usr/lib64/dotnet/dotnet"]}}'
+ms-dotnettools.vscode-dotnet-runtime: '{"installed":[],"dotnet.returnedInstallDirectories":{"session-767463b98c":["/usr/lib64/dotnet/dotnet"],"session-49d4c4ad81":["/usr/lib64/dotnet/dotnet"],"session-28f95e2446":["/usr/lib64/dotnet/dotnet"],"session-66cef6d48f":["/usr/lib64/dotnet/dotnet"],"session-86a8e518e5":["/usr/lib64/dotnet/dotnet"],"session-a8add3caf6":["/usr/lib64/dotnet/dotnet"]}}'
 workbench.activity.pinnedViewlets2: '[{"id":"workbench.view.explorer","pinned":true,"visible":false,"order":0},{"id":"workbench.view.search","pinned":true,"visible":false,"order":1},{"id":"workbench.view.scm","pinned":true,"visible":false,"order":2},{"id":"workbench.view.debug","pinned":true,"visible":false,"order":3},{"id":"workbench.view.remote","pinned":true,"visible":false,"order":4},{"id":"workbench.view.extensions","pinned":true,"visible":false,"order":4},{"id":"workbench.view.extension.test","pinned":true,"visible":false,"order":6},{"id":"workbench.view.extension.references-view","pinned":true,"visible":false,"order":7},{"id":"workbench.view.extension.continue","pinned":true,"visible":false,"order":8},{"id":"workbench.view.extension.python","pinned":true,"visible":false,"order":9},{"id":"workbench.view.extension.rustSyntaxTreeContainer","pinned":true,"visible":false,"order":10}]'
 workbench.activity.placeholderViewlets: "[{\"id\":\"workbench.view.explorer\",\
   \"themeIcon\":{\"id\":\"explorer-view-icon\"},\"name\":\"Explorer\",\"isBuilt\
@@ -119,7 +119,7 @@ workbench.auxiliarybar.placeholderPanels: '[{"id":"workbench.panel.chat","themeI
   || chatPanelParticipantRegistered || !chatSetupDisabledInWorkspace &&
   !chatSetupHidden && !config.chat.disableAIFeatures"}]}]'
 workbench.auxiliaryBar.size: "300"
-workbench.editor.languageDetectionOpenedLanguages.global: '[["xml",true],["editorconfig",true],["plaintext",true],["shellscript",true],["jsonc",true],["json",true],["csharp",true],["yaml",true],["markdown",true],["ignore",true],["typescript",true],["typescriptreact",true]]'
+workbench.editor.languageDetectionOpenedLanguages.global: '[["jsonc",true],["yaml",true],["ignore",true],["json",true],["plaintext",true],["dotenv",true],["javascript",true],["markdown",true],["typescriptreact",true],["typescript",true],["xml",true],["csharp",true]]'
 workbench.explorer.views.state.hidden: '[{"id":"outline","isHidden":false},{"id":"timeline","isHidden":false},{"id":"workbench.explorer.openEditorsView","isHidden":true},{"id":"workbench.explorer.emptyView","isHidden":false},{"id":"workbench.explorer.fileView","isHidden":false},{"id":"npm","isHidden":true},{"id":"rustDependencies","isHidden":false}]'
 workbench.newDefaultThemeNotification: "true"
 workbench.panel.alignment: center
