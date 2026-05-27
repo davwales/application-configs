@@ -9,6 +9,7 @@ A collection of application configurations, organized by branch.
 | [`nvim`](../../tree/nvim) | Neovim editor (kickstart.nvim-based) |
 | [`pi-coder-agent`](../../tree/pi-coder-agent) | Pi Coder Agent |
 | [`vscodium`](../../tree/vscodium) | VSCodium editor |
+| [`tmux`](../../tree/tmux) | Tmux terminal multiplexer (Catppuccin mocha) |
 
 ## Usage
 
@@ -20,6 +21,7 @@ cd application-configs
 git checkout nvim            # for Neovim config
 git checkout pi-coder-agent  # for Pi Coder Agent config
 git checkout vscodium        # for VSCodium config
+git checkout tmux            # for Tmux config
 ```
 
 Or clone a single branch directly:
