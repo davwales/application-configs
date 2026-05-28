@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+# Name of your tmux session
+SESSION_NAME="ouranos-workspace"
+
+# Check if the session already exists
+tmux has-session -t "$SESSION_NAME" 2>/dev/null
+
+if [ $? -ne 0 ]; then
+    # 1. Create the session and set the path for the first window
+    # -d tells tmux not to attach to it immediately
+    tmux new-session -d -s "$SESSION_NAME" -n "home" -c "$HOME"
+
+    # 2. Add additional windows with distinct default paths
+    tmux new-window -t "$SESSION_NAME" -c "$HOME/source/ouranos/ouranos-pantheon"
+    tmux new-window -t "$SESSION_NAME" -c "$HOME/source/ouranos/ouranos-ml"
+    tmux new-window -t "$SESSION_NAME" -c "$HOME/source/ouranos/ouranos-foundry"
+    tmux new-window -t "$SESSION_NAME" -n "ouranos-server"
+
+    # 3. Optional: Send specific commands to certain windows
+    tmux send-keys -t "$SESSION_NAME:ouranos-server" "ssh dwales@ouranos.local" C-m
+
+    # 4. Focus back on your preferred starting window
+    tmux select-window -t "$SESSION_NAME:home"
+fi
+
+# Attach to the session (whether it was just created or already existed)
+tmux attach-session -t "$SESSION_NAME"
