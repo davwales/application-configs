@@ -2,7 +2,7 @@
 name: scout
 description: Fast codebase reconnaissance. Returns structured, compressed context for handoff to other agents. Absorbs context-building responsibilities.
 tools: read, grep, find, ls, bash
-model: ollama-cloud/minimax-m2.7
+model: ollama-cloud/minimax-m3
 thinking: low
 ---
 

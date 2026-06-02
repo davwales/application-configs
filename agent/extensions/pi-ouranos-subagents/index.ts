@@ -364,7 +364,8 @@ async function runSingleAgent(
 			args.push("--append-system-prompt", tmpPromptPath);
 		}
 
-		args.push(`Task: ${task}`);
+		const effectiveCwd = cwd ?? defaultCwd;
+		args.push(`Task: Working directory: ${effectiveCwd}\n\n${task}`);
 		let wasAborted = false;
 
 		const exitCode = await new Promise<number>((resolve) => {
@@ -687,6 +688,29 @@ function renderExpandedSingle(
 }
 
 // ─── Tool Registration ─────────────────────────────────────────────────────────
+
+let cachedOrchestratorPrompt: string | null = null;
+
+function loadOrchestratorPrompt(): string {
+	if (cachedOrchestratorPrompt !== null) return cachedOrchestratorPrompt;
+
+	const agentDir = getAgentDir();
+	const promptPath = path.join(agentDir, "prompts", "orchestrator.md");
+
+	if (!fs.existsSync(promptPath)) {
+		cachedOrchestratorPrompt = "";
+		return "";
+	}
+
+	const content = fs.readFileSync(promptPath, "utf-8");
+
+	// Parse frontmatter — we only want the body, not the metadata
+	const frontmatterMatch = content.match(/^---\s*\n[\s\S]*?\n---\s*\n/);
+	const body = frontmatterMatch ? content.slice(frontmatterMatch[0].length) : content;
+
+	cachedOrchestratorPrompt = body.trim();
+	return cachedOrchestratorPrompt;
+}
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
@@ -1178,5 +1202,20 @@ export default function (pi: ExtensionAPI) {
 				return new Text(`[subagent render error: ${e instanceof Error ? e.message : String(e)}]`, 0, 0);
 			}
 		},
+	});
+
+	// Inject orchestrator identity into the main agent (not subagents)
+	pi.on("before_agent_start", async (_event, _ctx) => {
+		// Skip injection in subagent contexts — they have their own identity
+		if (process.env.PI_SUBAGENT === "1") {
+			return;
+		}
+
+		const prompt = loadOrchestratorPrompt();
+		if (!prompt) return;
+
+		return {
+			systemPrompt: `\n\n${prompt}`,
+		};
 	});
 }

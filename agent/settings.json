@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.75.5",
+  "lastChangelogVersion": "0.78.0",
   "packages": [
     "npm:pi-ollama-cloud",
     "npm:@ifi/oh-pi-themes",
@@ -21,12 +21,6 @@
       "enabled": true,
       "needsAttentionAfterMs": 300000,
       "activeNoticeAfterMs": 600000
-    },
-    "agentOverrides": {
-      "worker": {
-        "model": "ollama-cloud/deepseek-v4-flash",
-        "thinking": "medium"
-      }
     }
   },
   "theme": "catppuccin-mocha",
