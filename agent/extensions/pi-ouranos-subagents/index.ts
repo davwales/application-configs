@@ -22,7 +22,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, getAgentDir, getMarkdownTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type AgentConfig, type AgentScope, applyAgentOverrides, discoverAgents, formatAvailableAgents } from "./agents.js";
+import { type AgentConfig, type AgentScope, applyAgentOverrides, applyFleet, discoverAgents, formatAvailableAgents, getFleetAgentNames, loadActiveFleet } from "./agents.js";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -730,9 +730,10 @@ export default function (pi: ExtensionAPI) {
 			const agentScope: AgentScope = params.agentScope ?? "user";
 			const discovery = discoverAgents(ctx.cwd, agentScope);
 
-			// Apply subagents.agentOverrides from settings.json
+			// Apply fleet and agentOverrides from settings.json
 			const agentDir = getAgentDir();
-			const agents = applyAgentOverrides(discovery.agents, agentDir);
+			const fleet = loadActiveFleet(agentDir);
+			const agents = applyAgentOverrides(applyFleet(discovery.agents, fleet), agentDir);
 
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 
@@ -1214,8 +1215,22 @@ export default function (pi: ExtensionAPI) {
 		const prompt = loadOrchestratorPrompt();
 		if (!prompt) return;
 
+		// Load active fleet and inject agent availability
+		const agentDir = getAgentDir();
+		const fleet = loadActiveFleet(agentDir);
+		const fleetAgentNames = getFleetAgentNames(fleet);
+
+		let fleetContext = "";
+		if (fleet && fleetAgentNames) {
+			// Restrictive fleet: only listed agents available
+			fleetContext = `\n\n## Active Fleet: ${fleet.name}\nThe following agents are available (others are disabled): ${fleetAgentNames.join(", ")}.\nWhen planning workflows, only delegate to these agents.`;
+		} else if (fleet) {
+			// Permissive fleet: all agents available with overridden models
+			fleetContext = `\n\n## Active Fleet: ${fleet.name}\nAll agents are available. Model assignments from this fleet are in effect.`;
+		}
+
 		return {
-			systemPrompt: `\n\n${prompt}`,
+			systemPrompt: `\n\n${prompt}${fleetContext}`,
 		};
 	});
 }

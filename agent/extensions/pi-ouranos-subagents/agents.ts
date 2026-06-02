@@ -122,6 +122,68 @@ export interface AgentOverrides {
 	};
 }
 
+export interface AgentFleetEntry {
+  provider: string;
+  model: string;
+  thinking?: string;
+}
+
+export interface FleetConfig {
+  name: string;
+  agents: Record<string, AgentFleetEntry>;
+  default?: AgentFleetEntry;
+}
+
+/**
+ * Load the active fleet from settings.json.
+ * Returns the fleet config if activeFleet is set and the file exists, null otherwise.
+ */
+export function loadActiveFleet(agentDir: string): FleetConfig | null {
+  try {
+    const settingsPath = path.join(agentDir, "settings.json");
+    if (!fs.existsSync(settingsPath)) return null;
+    
+    const content = fs.readFileSync(settingsPath, "utf-8");
+    const settings = JSON.parse(content);
+    const fleetName = settings?.activeFleet;
+    
+    if (!fleetName || typeof fleetName !== "string" || fleetName.trim() === "") {
+      return null;
+    }
+    
+    const fleetPath = path.join(agentDir, "fleets", `${fleetName.trim()}.json`);
+    if (!fs.existsSync(fleetPath)) {
+      console.warn(`[subagents] Active fleet "${fleetName}" not found at ${fleetPath}, ignoring.`);
+      return null;
+    }
+    
+    const fleetContent = fs.readFileSync(fleetPath, "utf-8");
+    const fleet = JSON.parse(fleetContent);
+    
+    if (!fleet || typeof fleet !== "object") {
+      console.error(`[subagents] Fleet "${fleetName}" is not a valid JSON object, ignoring.`);
+      return null;
+    }
+    if (typeof fleet.name !== "string") {
+      console.error(`[subagents] Fleet "${fleetName}" missing required "name" field, ignoring.`);
+      return null;
+    }
+    if (!fleet.agents || typeof fleet.agents !== "object") {
+      console.error(`[subagents] Fleet "${fleetName}" missing required "agents" field, ignoring.`);
+      return null;
+    }
+    if (fleet.default !== undefined && (typeof fleet.default !== "object" || !fleet.default.provider || !fleet.default.model)) {
+      console.warn(`[subagents] Fleet "${fleetName}" has invalid "default" field, ignoring default.`);
+      fleet.default = undefined;
+    }
+    
+    return fleet as FleetConfig;
+  } catch (e) {
+    console.error(`[subagents] Failed to load active fleet: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
 /**
  * Read the subagents.agentOverrides section from settings.json.
  * These override the model/thinking values from agent frontmatter.
@@ -136,6 +198,61 @@ export function loadAgentOverrides(agentDir: string): AgentOverrides {
 	} catch {
 		return {};
 	}
+}
+
+/**
+ * Apply fleet-level model assignments to agents.
+ * Fleet entries take precedence over frontmatter models.
+ * agentOverrides (applied separately) take precedence over fleet.
+ */
+export function applyFleet(agents: AgentConfig[], fleet: FleetConfig | null): AgentConfig[] {
+  if (!fleet) return agents;
+  
+  const hasDefault = fleet.default !== undefined;
+  
+  const result: AgentConfig[] = [];
+  
+  for (const agent of agents) {
+    const fleetEntry = fleet.agents[agent.name] ?? fleet.default;
+    
+    // Restrictive mode: no default → unlisted agents are excluded
+    if (!fleetEntry) {
+      if (!hasDefault) continue; // skip/exclude this agent
+      result.push(agent); // permissive mode: keep with original model
+      continue;
+    }
+    
+    const provider = fleetEntry.provider?.trim();
+    const model = fleetEntry.model?.trim();
+    if (!provider || !model) {
+      // Invalid fleet entry — skip this agent regardless of mode
+      continue;
+    }
+    
+    let resolvedModel = `${provider}/${model}`;
+    if (fleetEntry.thinking) {
+      resolvedModel = `${resolvedModel}:${fleetEntry.thinking}`;
+    }
+    
+    result.push({
+      ...agent,
+      model: resolvedModel,
+    });
+  }
+  
+  return result;
+}
+
+/**
+ * Return the list of agent names available under the active fleet.
+ * In restrictive mode (no default), this is fleet.agents keys.
+ * In permissive mode (has default), returns null (all agents available).
+ * Returns null if no fleet is active.
+ */
+export function getFleetAgentNames(fleet: FleetConfig | null): string[] | null {
+  if (!fleet) return null;
+  if (fleet.default !== undefined) return null; // permissive — all agents
+  return Object.keys(fleet.agents);
 }
 
 /**
