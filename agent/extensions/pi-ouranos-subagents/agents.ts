@@ -4,6 +4,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 
 export type AgentScope = "user" | "project" | "both";
@@ -13,8 +14,9 @@ export interface AgentConfig {
 	description: string;
 	tools?: string[];
 	model?: string;
+	thinking?: string;
 	systemPrompt: string;
-	source: "user" | "project";
+	source: "user" | "project" | "package";
 	filePath: string;
 }
 
@@ -23,7 +25,7 @@ export interface AgentDiscoveryResult {
 	projectAgentsDir: string | null;
 }
 
-function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
+function loadAgentsFromDir(dir: string, source: "user" | "project" | "package"): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
 	if (!fs.existsSync(dir)) {
@@ -60,11 +62,17 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			.map((t: string) => t.trim())
 			.filter(Boolean);
 
+		let model = frontmatter.model;
+		if (model && frontmatter.thinking && !model.includes(":")) {
+			model = `${model}:${frontmatter.thinking}`;
+		}
+
 		agents.push({
 			name: frontmatter.name,
 			description: frontmatter.description,
 			tools: tools && tools.length > 0 ? tools : undefined,
-			model: frontmatter.model,
+			model,
+			thinking: frontmatter.thinking,
 			systemPrompt: body,
 			source,
 			filePath,
@@ -82,6 +90,11 @@ function isDirectory(p: string): boolean {
 	}
 }
 
+function getPackageAgentsDir(): string {
+	const packageDir = path.dirname(fileURLToPath(import.meta.url));
+	return path.join(packageDir, "agents");
+}
+
 function findNearestProjectAgentsDir(cwd: string): string | null {
 	let currentDir = cwd;
 	while (true) {
@@ -97,18 +110,26 @@ function findNearestProjectAgentsDir(cwd: string): string | null {
 export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
 	const userDir = path.join(getAgentDir(), "agents");
 	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
+	const packageAgentsDir = getPackageAgentsDir();
+
+	// Package agents are always loaded as the base layer
+	const packageAgents = loadAgentsFromDir(packageAgentsDir, "package");
 
 	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
 	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
 
 	const agentMap = new Map<string, AgentConfig>();
 
-	if (scope === "both") {
+	// Layer 1: Package agents (base)
+	for (const agent of packageAgents) agentMap.set(agent.name, agent);
+
+	// Layer 2: User agents (override package)
+	if (scope !== "project") {
 		for (const agent of userAgents) agentMap.set(agent.name, agent);
-		for (const agent of projectAgents) agentMap.set(agent.name, agent);
-	} else if (scope === "user") {
-		for (const agent of userAgents) agentMap.set(agent.name, agent);
-	} else {
+	}
+
+	// Layer 3: Project agents (highest priority, override user and package)
+	if (scope !== "user" && projectAgentsDir) {
 		for (const agent of projectAgents) agentMap.set(agent.name, agent);
 	}
 
@@ -268,10 +289,10 @@ export function applyAgentOverrides(agents: AgentConfig[], agentDir: string): Ag
 
 		let model = override.model ?? agent.model;
 		if (model && override.thinking) {
-			// Append thinking level as suffix if not already present
-			if (!model.includes(":")) {
-				model = `${model}:${override.thinking}`;
-			}
+			// Strip existing thinking suffix before applying override
+			const colonIdx = model.lastIndexOf(":");
+			if (colonIdx !== -1) model = model.slice(0, colonIdx);
+			model = `${model}:${override.thinking}`;
 		}
 
 		return {

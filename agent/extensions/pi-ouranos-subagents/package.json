@@ -1,0 +1,34 @@
+{
+  "name": "pi-ouranos-subagents",
+  "version": "0.1.0",
+  "description": "Delegate tasks to a fleet of 9 specialized subagents with isolated context. Supports single, parallel, and chained execution modes.",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "license": "MIT",
+  "author": "Ben",
+  "repository": {
+    "type": "git",
+    "url": "https://codeberg.org/dwales/application-configs/src/branch/pi-coder-agent"
+  },
+  "files": [
+    "agents/",
+    "prompts/",
+    "fleets/",
+    "agents.ts",
+    "index.ts"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}

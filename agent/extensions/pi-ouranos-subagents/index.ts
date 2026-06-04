@@ -16,6 +16,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -695,7 +696,13 @@ function loadOrchestratorPrompt(): string {
 	if (cachedOrchestratorPrompt !== null) return cachedOrchestratorPrompt;
 
 	const agentDir = getAgentDir();
-	const promptPath = path.join(agentDir, "prompts", "orchestrator.md");
+	const userPromptPath = path.join(agentDir, "prompts", "orchestrator.md");
+
+	const packageDir = path.dirname(fileURLToPath(import.meta.url));
+	const packagePromptPath = path.join(packageDir, "prompts", "orchestrator.md");
+
+	// User prompt overrides package prompt
+	const promptPath = fs.existsSync(userPromptPath) ? userPromptPath : packagePromptPath;
 
 	if (!fs.existsSync(promptPath)) {
 		cachedOrchestratorPrompt = "";
