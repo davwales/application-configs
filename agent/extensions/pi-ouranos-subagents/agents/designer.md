@@ -2,7 +2,7 @@
 name: designer
 description: Maps user requirements and frontend specs into structured component and layout blueprints. Strictly enforces the application's established design system.
 tools: read, grep, find, ls
-model: ollama-cloud/kimi-k2.6
+model: ollama-cloud/kimi-k2.7-code
 thinking: medium
 inheritProjectContext: true
 inheritSkills: true

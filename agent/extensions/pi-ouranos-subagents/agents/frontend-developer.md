@@ -2,7 +2,7 @@
 name: frontend-developer
 description: Implements anything the user directly sees or interacts with — UIs, CLI interfaces, GUIs, visual output, client-side logic. Follows designer blueprints and architect specs when provided. Works in any language or framework.
 tools: read, grep, find, ls, edit, write, bash
-model: ollama-cloud/kimi-k2.6
+model: ollama-cloud/kimi-k2.7-code
 thinking: high
 inheritProjectContext: true
 inheritSkills: true
