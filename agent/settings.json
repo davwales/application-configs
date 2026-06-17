@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.79.2",
+  "lastChangelogVersion": "0.79.6",
   "packages": [
     "npm:pi-ollama-cloud",
     "npm:@ifi/oh-pi-themes",
@@ -14,7 +14,7 @@
     "npm:pi-powerline-footer"
   ],
   "defaultProvider": "ollama-cloud",
-  "defaultModel": "deepseek-v4-pro",
+  "defaultModel": "glm-5.2",
   "activeFleet": "ollama-balanced",
   "subagents": {
     "asyncByDefault": true,

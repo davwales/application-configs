@@ -8,7 +8,7 @@
     "product-owner": { "provider": "ollama-cloud", "model": "deepseek-v4-flash", "thinking": "high" },
     "designer": { "provider": "ollama-cloud", "model": "kimi-k2.7-code", "thinking": "medium" },
     "frontend-developer": { "provider": "ollama-cloud", "model": "kimi-k2.7-code", "thinking": "high" },
-    "backend-developer": { "provider": "ollama-cloud", "model": "glm-5.1", "thinking": "high" },
+    "backend-developer": { "provider": "ollama-cloud", "model": "glm-5.2", "thinking": "high" },
     "worker": { "provider": "ollama-cloud", "model": "deepseek-v4-flash", "thinking": "medium" }
   }
 }

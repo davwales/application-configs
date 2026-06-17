@@ -2,7 +2,7 @@
 name: backend-developer
 description: Implements systems-oriented work the user never sees directly — APIs, services, databases, domain logic, drivers, data processing, infrastructure. Follows architect specs when provided. Works in any language or framework.
 tools: read, grep, find, ls, edit, write, bash
-model: ollama-cloud/glm-5.1
+model: ollama-cloud/glm-5.2
 thinking: high
 inheritProjectContext: true
 inheritSkills: true
