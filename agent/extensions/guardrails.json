@@ -1,6 +1,7 @@
 {
+  "$schema": "https://unpkg.com/@aliou/pi-guardrails@0.14.1/schema.json",
   "applyBuiltinDefaults": true,
-  "version": "0.9.0-20260327",
+  "version": "0.13.0-20260619",
   "onboarding": {
     "completed": true,
     "completedAt": "2026-05-14T17:17:28.108Z",
@@ -11,6 +12,27 @@
   },
   "pathAccess": {
     "mode": "ask",
-    "allowedPaths": ["/dev/null", "/dev/zero", "/dev/tty", "/dev/urandom", "/dev/random"]
+    "allowedPaths": [
+      {
+        "kind": "file",
+        "path": "/dev/null"
+      },
+      {
+        "kind": "file",
+        "path": "/dev/zero"
+      },
+      {
+        "kind": "file",
+        "path": "/dev/tty"
+      },
+      {
+        "kind": "file",
+        "path": "/dev/urandom"
+      },
+      {
+        "kind": "file",
+        "path": "/dev/random"
+      }
+    ]
   }
 }
