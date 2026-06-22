@@ -11,7 +11,8 @@
     "npm:@aliou/pi-guardrails",
     "npm:@juicesharp/rpiv-todo",
     "npm:@juicesharp/rpiv-ask-user-question",
-    "npm:pi-powerline-footer"
+    "npm:pi-powerline-footer",
+    "./agent/extensions/pi-ouranos-gitea"
   ],
   "defaultProvider": "ollama-cloud",
   "defaultModel": "glm-5.2",

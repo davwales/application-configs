@@ -1,0 +1,14 @@
+{
+  "instances": [
+    { "host": "git.example.com", "apiBase": "https://git.example.com/api/v1", "alias": "work" }
+  ],
+  "cache": {
+    "ttl": { "issue": 3600, "repo": 86400, "release": 86400, "commit": 0, "file": 0 },
+    "maxBytes": 10485760
+  },
+  "pagination": { "defaultLimit": 30, "maxLimit": 50 },
+  "truncation": {
+    "maxBodyChars": 50000,
+    "maxPatchChars": 10000
+  }
+}

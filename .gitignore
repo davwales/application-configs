@@ -8,6 +8,7 @@ agent/sessions/
 # Cached Data
 agent/cache/
 agent/extensions/context7/cache/
+agent/extensions/pi-ouranos-gitea/cache/
 
 # Auto-managed Binaries
 agent/bin/

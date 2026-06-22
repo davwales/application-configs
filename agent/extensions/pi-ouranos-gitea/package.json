@@ -1,0 +1,42 @@
+{
+  "name": "pi-ouranos-gitea",
+  "version": "0.1.0",
+  "description": "Read-only, no-auth Gitea/Forgejo/Codeberg tools for the Pi Coding Agent. Auto-detects repo from git remote, caches across sessions.",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "license": "MIT",
+  "author": "Ben",
+  "files": [
+    ".gitignore",
+    "index.ts",
+    "api.ts",
+    "detect.ts",
+    "cache.ts",
+    "config.ts",
+    "types.ts",
+    "util.ts",
+    "commands.ts",
+    "tools/issues.ts",
+    "tools/pulls.ts",
+    "tools/repos.ts",
+    "tools/labels.ts",
+    "tools/meta.ts",
+    "config.json.example",
+    "README.md",
+    "doc/"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}
