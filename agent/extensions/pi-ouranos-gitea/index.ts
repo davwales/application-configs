@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 
 import { buildKnownInstances, getEffectiveTTL, getTruncationLimits, loadConfig } from "./config.js";
 import { GiteaCache } from "./cache.js";
-import { clearDetectionCache, detectRepo } from "./detect.js";
+import { clearDetectionCache } from "./detect.js";
 import { registerMetaTools } from "./tools/meta.js";
 import { registerIssueTools } from "./tools/issues.js";
 import { registerPullRequestTools } from "./tools/pulls.js";
@@ -67,30 +67,11 @@ export default function (pi: ExtensionAPI): void {
   registerLabelTools(pi, deps);
   registerGiteaCommand(pi, deps);
 
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async () => {
     // Clear per-session detection cache so a fresh repo is picked up.
     clearDetectionCache();
     // Enforce the byte budget at session start.
     cache.evictIfOverSize(maxBytes);
-
-    // Best-effort: detect the repo and notify the user on success.
-    try {
-      const detected = await detectRepo(pi, ctx, knownInstances);
-      if (detected.detected) {
-        ctx.ui.setStatus(
-          "gitea",
-          `gitea: ${detected.host}/${detected.owner}/${detected.repo}`,
-        );
-      } else if (ctx.hasUI) {
-        // Don't spam: only set a status hint, no notify, when undetected.
-        ctx.ui.setStatus("gitea", undefined);
-      }
-    } catch {
-      ctx.ui.setStatus("gitea", undefined);
-    }
   });
 
-  pi.on("session_shutdown", (_event, ctx) => {
-    ctx.ui.setStatus("gitea", undefined);
-  });
 }
