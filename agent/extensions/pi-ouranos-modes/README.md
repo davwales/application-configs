@@ -74,6 +74,32 @@ Delete the `modePrefs.<mode>` entry (or the whole `modePrefs` object) from `sett
 
 The chat-box bottom border shows the active mode name in the mode's color, and the mode-switch notification also shows the active model + thinking level.
 
+## Mode-Change Requests (`request_mode_change` tool)
+
+The extension registers a `request_mode_change` tool the primary agent can call to suggest switching modes — prompting the user to confirm before switching (same `setMode` path as `/mode`, so the switch restores the target mode's saved model + thinking and updates the active tool set). The switch happens immediately on approval.
+
+Parameters:
+- `mode` (string, required) — target mode id (`"default"`, `"plan"`, `"build"`, `"orchestrator"`, or any custom mode id). Validated at runtime.
+- `reason` (string, optional) — the plan or a readable summary, shown in the confirmation popup so the user can review it while deciding. Also delivered to the next mode as its kickoff instruction.
+
+The tool is part of the baseline tool set, so it is active in every mode. Only the primary agent calls it: subagents run isolated without interactive UI, and their tool set is restricted to their frontmatter `tools:` list (which won't include this tool). The execute handler refuses if invoked from a subagent context (`PI_SUBAGENT=1`) or when there's no interactive UI (`!ctx.hasUI`), telling the user to run `/mode <name>` manually instead.
+
+**System-prompt correctness:** on approval the tool switches the mode and ends the current turn (`terminate: true` — the LLM produces no further output under the now-stale old-mode prompt) while queueing a fresh turn in the new mode (`pi.sendUserMessage` with `deliverAs: "followUp"`). The fresh turn gets a new `before_provider_request`, so the LLM always operates under the current mode's system prompt. The `reason` doubles as the kickoff for that turn.
+
+Mode prompts nudge its use:
+- **plan** mode: present the plan in your response, then call `request_mode_change({ mode: "build", reason: "<plan summary>" })` so the user can read the plan in the popup and switch to execute it.
+- **build** mode: on unexpected complexity that needs planning, call `request_mode_change({ mode: "plan", reason })`.
+
+## Working Artifacts (`.local/`)
+
+Mode prompts instruct agents to write working/reference markdown files (notes, traces, scratch output — anything that is not part of the implementation) to a `.local/` directory at the project root. This directory is intended to be gitignored, keeping the repo tree pristine while giving agents writable scratch space inside the working directory (subagents can't write outside the CWD).
+
+- Plan mode is **read-only** (see Tool Restriction) — it does not write files. The plan is presented as conversation output and carried into build mode via `request_mode_change`.
+- Build mode's working artifacts (and the `builder` agent's auxiliary files) go to `.local/`.
+- Implementation files go in their normal project locations — only auxiliary artifacts use `.local/`.
+
+Add `.local/` to your project's `.gitignore` to keep these working files out of version control.
+
 ## Files
 
 ```
@@ -97,15 +123,55 @@ On first run the shipped `modes/*` directories are copied into `~/.pi/agent/mode
 name: Display Name
 description: shown in the /mode selector
 color: accent | muted | warning | success | error | dim
+excludeTools: write, edit         # optional: tools to remove from this mode's active set
+tools: read, grep, find, ls, bash  # optional: exhaustive allowlist (overrides excludeTools)
 ---
 Delegation-policy prompt body (injected via before_provider_request).
 ```
 
 There is no `fleet:` field — modes own their agents inline and the extension does not touch `activeFleet`.
 
+## Tool Restriction (per-mode)
+
+A mode can hard-restrict its active tool set via frontmatter — declarative, no code changes, extensible to any mode (including project-local `.pi/modes/<name>/mode.md`):
+
+- **`excludeTools:`** (comma-separated) — subtract from the baseline tool set. The common case: new extension tools auto-appear; name only what to remove.
+- **`tools:`** (comma-separated) — exhaustive allowlist; the active set = listed tools ∩ baseline. Tight control for minimal modes. Takes precedence over `excludeTools:` when both are set.
+
+**Precedence** (in `setMode` via `computeActiveTools`):
+1. `tools:` set → active = baseline ∩ tools (the `hasAgents`→`subagent` default is NOT applied — the explicit list wins).
+2. else → active = baseline − `excludeTools`; if the mode has no agents, `subagent` is auto-excluded too (preserves the pre-existing default).
+
+Example — **plan mode** is hard read-only:
+```yaml
+excludeTools: write, edit
+bashMode: readonly
+```
+The plan-mode primary agent literally cannot call `write` or `edit` (they're not in its active tool set). `bash` stays available for read-only inspection but is guarded by `bashMode: readonly` (see below) — mutating bash commands (`rm`, `git push`, write redirects, non-whitelisted commands) are blocked at the `tool_call` layer. The **planner subagent** is separately hard-restricted via its own exhaustive `tools: read, grep, find, ls, bash` frontmatter (no `write`/`edit`); its `bash` calls are also guarded by the read-only whitelist (the subagent process loads the same mode config).
+
+### Bash read-only guard (`bashMode: readonly`)
+
+`excludeTools`/`tools` operate at the tool-name level — they can't express "bash but only read-only commands." For that, a mode can declare `bashMode: readonly`:
+
+```yaml
+bashMode: readonly
+```
+
+When active, the extension's `tool_call` handler intercepts every `bash` call and runs the command through a read-only classifier:
+
+- **File-writing redirects** (`>`, `>>`, `2>`, `&>`, `2>>`) to a real file are blocked. Redirects to `/dev/null` and stream-combining (`2>&1`) are allowed.
+- The command chain is split on `;`, `&&`, `||`, `|`; each segment's first command is checked:
+  - `git` subcommands must be in a read-only whitelist (`log`, `status`, `diff`, `show`, `blame`, `ls-files`, `rev-parse`, `describe`, `reflog`, `cat-file`, `for-each-ref`, `ls-remote`, …). `branch`/`remote`/`config`/`add`/`commit`/`push`/`merge`/`rebase`/… are blocked.
+  - Other commands must be in a read-only whitelist (`grep`/`rg`, `find`, `ls`, `cat`, `head`, `tail`, `wc`, `diff`, `stat`, `realpath`, `sort`, `uniq`, `cut`, `od`, `xxd`, `strings`, `sha256sum`, …). `rm`/`mv`/`cp`/`mkdir`/`touch`/`chmod`/`sed`/`awk`/`dd`/`tee`/`xargs`/`bash`/`python`/`node`/… are blocked.
+- A blocked call returns `{ block: true, reason }`; the reason is surfaced to the LLM so it can adjust (or you can switch to build mode).
+- **Fail-safe:** if the classifier throws, pi blocks the tool (per `tool_call` semantics — errors block).
+- **Heuristic, not a sandbox:** this prevents *accidental* mutation. A determined actor could craft a bypass (e.g. an allowed command that shells out). The goal is guard rails for normal read-only use, not a security boundary.
+
 ## Agent frontmatter
 
-Same format as `pi-ouranos-subagents` agents, plus the `model: inherit` sentinel:
+Same format as `pi-ouranos-subagents` agents, plus the `model: inherit` and
+`thinking: inherit` sentinels (resolved by `pi-ouranos-subagents` against the
+primary agent's currently selected model + thinking level at spawn time):
 
 ```yaml
 ---
@@ -113,10 +179,15 @@ name: planner
 description: ...
 tools: read, grep, find, ls, bash
 model: inherit        # resolved to the primary agent's current model
-thinking: medium
+thinking: inherit     # resolved to the primary agent's current thinking level
 ---
 Prompt body.
 ```
+
+Either sentinel is optional. A static `thinking:` value (e.g. `thinking: medium`)
+is used as-is; `thinking: inherit` dynamically adopts whatever thinking level the
+primary agent has selected (including the per-mode restored level, since
+`pi-ouranos-modes` restores the mode's saved thinking on every switch).
 
 ## Install
 

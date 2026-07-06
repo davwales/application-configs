@@ -28,17 +28,112 @@
  * Replaces the npm pi-modes extension.
  */
 
-import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, isToolCallEventType, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { Type } from "typebox";
 
 const PERSIST_KEY = "modes-state";
 
 // Preferred cycle order. Any extra modes discovered are appended alphabetically.
 const PREFERRED_ORDER = ["default", "plan", "build", "orchestrator"];
+
+// ── Bash read-only guard (for modes declaring `bashMode: readonly`) ──────────
+// A heuristic whitelist of read-only bash commands + git subcommands, used by
+// the tool_call handler to block mutating bash commands in read-only modes
+// (plan mode). This is NOT a security sandbox — it prevents *accidental*
+// mutation (rm, git push, write redirects) while allowing normal read-only
+// inspection (grep, find, ls, git log). A determined actor could craft a
+// bypass (e.g. `python -c "os.remove(...)"`); the goal is guard rails, not a
+// hard boundary. Commands like `bash`, `sh`, `python`, `node`, `sed`, `awk`,
+// `dd`, `tee`, `xargs` are deliberately NOT whitelisted (they can mutate).
+
+const READONLY_BASH_COMMANDS = new Set([
+  "cat", "head", "tail", "less", "more", "wc", "file", "stat", "du", "df",
+  "pwd", "echo", "printf", "env", "printenv", "which", "type", "command",
+  "grep", "egrep", "fgrep", "rg", "ag", "ack", "find", "ls", "dir", "tree",
+  "locate", "whereis", "whoami", "id", "uname", "hostname", "date", "cal",
+  "uptime", "w", "last", "test", "true", "false", "diff", "basename",
+  "dirname", "realpath", "readlink", "tty", "seq", "tr", "sort", "uniq",
+  "cut", "paste", "column", "nl", "tac", "od", "xxd", "strings", "expand",
+  "unexpand", "fold", "fmt", "pr", "rev", "factor", "sum", "cksum",
+  "sha256sum", "md5sum", "shasum", "base64", "basenc",
+]);
+
+const READONLY_GIT_SUBCOMMANDS = new Set([
+  "log", "status", "diff", "show", "blame", "annotate", "ls-files", "ls-tree",
+  "ls-remote", "rev-parse", "rev-list", "describe", "reflog", "shortlog",
+  "name-rev", "cat-file", "whatchanged", "grep", "for-each-ref",
+  "for-each-blob", "show-ref", "show-branch", "help", "var", "cherry",
+  "range-diff", "mailinfo", "stripspace",
+  // branch, remote, config, add, commit, push, pull, fetch, merge, rebase,
+  // reset, checkout, stash, rm, mv, restore, switch, tag, worktree, apply,
+  // am, init, clone, etc. are NOT whitelisted (they can mutate).
+]);
+
+/** Split a bash command chain into individual command segments, handling
+ *  `;`, `&&`, `||`, and `|` as separators. (Pipes inside quoted strings are
+ *  not handled — over-splitting is conservative and safe.) */
+function splitBashChain(command: string): string[] {
+  const sentinel = "\u0000";
+  return command
+    .replace(/&&/g, sentinel)
+    .replace(/\|\|/g, sentinel)
+    .split(/[;|\u0000]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/** Detect file-writing redirects (`>`, `>>`, `2>`, `&>`, `2>>`) to a real
+ *  file. Allows redirects to /dev/null (and /dev/stdout etc.) and
+ *  stream-combining `2>&1` / `1>&2` (no file target). Conservative: `>=`
+ *  comparisons inside `(( ))` also match (rare in read-only use). */
+function hasWritingRedirect(command: string): boolean {
+  const re = /(?:^|[\s;&|(])([2&]?)(>{1,2})\s*(\S*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(command)) !== null) {
+    const target = m[3];
+    if (target === "") continue;                  // no file target (e.g. `2>&1` has &1 after)
+    if (target === "&1" || target === "&2") continue; // stream combine, no file
+    if (target.startsWith("/dev/")) continue;       // /dev/null, /dev/stdout, etc.
+    return true;
+  }
+  return false;
+}
+
+/** Classify a bash command as read-only or mutating for read-only modes.
+ *  Returns { ok: true } if read-only, { ok: false, reason } if mutating. */
+function classifyBashCommand(command: string): { ok: boolean; reason?: string } {
+  if (hasWritingRedirect(command)) {
+    return {
+      ok: false,
+      reason: "Bash command writes to a file via a `>` / `>>` redirect. Read-only modes forbid file writes.",
+    };
+  }
+  for (const segment of splitBashChain(command)) {
+    const tokens = segment.split(/\s+/).filter(Boolean);
+    const first = tokens[0];
+    if (!first) continue;
+    if (first === "git") {
+      const sub = tokens[1] ?? "";
+      if (!READONLY_GIT_SUBCOMMANDS.has(sub)) {
+        return {
+          ok: false,
+          reason: `git ${sub || "(no subcommand)"} is not in the read-only git whitelist. Read-only modes forbid mutating git.`,
+        };
+      }
+    } else if (!READONLY_BASH_COMMANDS.has(first)) {
+      return {
+        ok: false,
+        reason: `"${first}" is not in the read-only bash whitelist. Read-only modes forbid non-read-only commands. (Switch to build mode if you genuinely need it.)`,
+      };
+    }
+  }
+  return { ok: true };
+}
 
 /** Per-mode persisted model + thinking preference.
  *
@@ -62,6 +157,9 @@ interface ModeDef {
   color: string;
   prompt: string; // mode.md body
   hasAgents: boolean; // whether the mode has any agent .md files (user + project layers)
+  tools?: string[]; // exhaustive tool allowlist (frontmatter `tools:`); active set = baseline ∩ tools
+  excludeTools?: string[]; // tools to exclude from baseline (frontmatter `excludeTools:`)
+  bashMode?: string; // "readonly" → bash tool calls are guarded by a read-only command whitelist
 }
 
 export default function modesExtension(pi: ExtensionAPI): void {
@@ -103,6 +201,9 @@ export default function modesExtension(pi: ExtensionAPI): void {
     let name = id;
     let description = "";
     let color = "accent";
+    let tools: string[] | undefined;
+    let excludeTools: string[] | undefined;
+    let bashMode: string | undefined;
 
     for (const line of yamlLines) {
       const trimmed = line.trim();
@@ -127,9 +228,24 @@ export default function modesExtension(pi: ExtensionAPI): void {
         if (parsed) color = parsed;
         continue;
       }
+      if (/^tools:(?: |$)/.test(trimmed)) {
+        const parsed = trimmed.slice(trimmed.indexOf(":") + 1).trim();
+        tools = parsed ? parsed.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+        continue;
+      }
+      if (/^excludeTools:(?: |$)/.test(trimmed)) {
+        const parsed = trimmed.slice(trimmed.indexOf(":") + 1).trim();
+        excludeTools = parsed ? parsed.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+        continue;
+      }
+      if (/^bashMode:(?: |$)/.test(trimmed)) {
+        const parsed = trimmed.slice(trimmed.indexOf(":") + 1).trim();
+        bashMode = parsed || undefined;
+        continue;
+      }
     }
 
-    return { id, name, description, color, prompt, hasAgents: false };
+    return { id, name, description, color, prompt, hasAgents: false, tools, excludeTools, bashMode };
   }
 
   function isDirectory(p: string): boolean {
@@ -408,20 +524,37 @@ export default function modesExtension(pi: ExtensionAPI): void {
     }
   }
 
+  /** Compute the active tool set for a mode from the baseline + the mode's
+   *  declarative frontmatter config:
+   *  - `tools:` (exhaustive allowlist) → active = baseline ∩ tools. The
+   *    hasAgents→subagent default is NOT applied (the explicit list wins).
+   *  - `excludeTools:` (excludelist) → active = baseline − excludeTools; if
+   *    the mode has no agents, `subagent` is auto-excluded too (preserves the
+   *    pre-existing default behavior for no-agent modes).
+   *  - neither → baseline, with the hasAgents→subagent default. */
+  function computeActiveTools(mode: ModeDef, baseline: string[]): string[] {
+    if (mode.tools && mode.tools.length > 0) {
+      const want = new Set(mode.tools);
+      return baseline.filter((n) => want.has(n));
+    }
+    const exclude = new Set(mode.excludeTools ?? []);
+    if (!mode.hasAgents) exclude.add("subagent");
+    return baseline.filter((n) => !exclude.has(n));
+  }
+
   async function setMode(ctx: ExtensionContext, index: number): Promise<boolean> {
     if (index < 0 || index >= availableModes.length) return false;
     if (baselineTools.length === 0) return false; // session not ready
 
     const mode = availableModes[index];
 
-    // Tool set: baseline captured at session_start, minus the `subagent`
-    // tool when the mode has no agents (default mode). We start from the
-    // captured baseline (not pi.getAllTools()) so other extensions' tool
-    // disables are respected. The subagent tool's per-turn visibility is
-    // also reinforced by pi-ouranos-subagents' before_agent_start.
-    const active = mode.hasAgents
-      ? baselineTools
-      : baselineTools.filter((n) => n !== "subagent");
+    // Tool set: baseline captured at session_start, filtered by the mode's
+    // declarative tool config (frontmatter `tools:` allowlist / `excludeTools:`
+    // excludelist). We start from the captured baseline (not pi.getAllTools())
+    // so other extensions' tool disables are respected. The subagent tool's
+    // per-turn visibility is also reinforced by pi-ouranos-subagents'
+    // before_agent_start.
+    const active = computeActiveTools(mode, baselineTools);
     try {
       pi.setActiveTools(active);
     } catch (err) {
@@ -523,6 +656,146 @@ export default function modesExtension(pi: ExtensionAPI): void {
   pi.registerFlag("mode", {
     description: `Start in a specific mode (${PREFERRED_ORDER.join(" | ")})`,
     type: "string",
+  });
+
+  // ── request_mode_change tool ──────────────────────────────────────────────
+  // Lets the primary agent suggest a mode change (e.g. plan→build once the
+  // plan is written to .local/PLAN.md). Prompts the user via ctx.ui.confirm
+  // and, on approval, calls setMode to switch immediately — same path as the
+  // /mode command, so the switch restores the target mode's saved model +
+  // thinking and updates the active tool set. Refuses in subagent contexts
+  // (they run isolated without interactive UI). The tool lives in the
+  // baseline tool set captured at session_start, so it is active in every
+  // mode; only the primary agent (which has all tools) calls it — subagents'
+  // tools are restricted to their frontmatter `tools:` list, which won't
+  // include this.
+  pi.registerTool({
+    name: "request_mode_change",
+    label: "Request Mode Change",
+    description: [
+      "Suggest switching to a different mode, prompting the user to confirm before switching.",
+      'Use when the current mode\'s work is complete and the next mode should take over',
+      '(e.g. call with mode:"build" once a plan is finished and ready to execute).',
+      'The mode switches immediately on approval (same path as /mode).',
+    ].join(" "),
+    promptSnippet: "Request a mode change (e.g. plan→build once the plan is complete)",
+    promptGuidelines: [
+      'Use request_mode_change when the current mode\'s work is complete and the next mode should take over. For example, in plan mode once the plan is written and ready, call request_mode_change with mode:"build" and a brief reason to offer the user a seamless switch to execution. In build mode, if you hit unexpected complexity that needs planning, call it with mode:"plan". The user must confirm before the switch happens.',
+    ],
+    parameters: Type.Object({
+      mode: Type.String({
+        description:
+          'Target mode id: "default" | "plan" | "build" | "orchestrator" (or any custom mode id). Validated at runtime against the available modes.',
+      }),
+      reason: Type.Optional(
+        Type.String({
+          description: "The plan or a readable summary, shown in the confirmation popup so the user can review it while deciding. Also delivered to the next mode as its kickoff instruction (the mode switches and a fresh turn continues under the new mode's prompt).",
+        }),
+      ),
+    }),
+
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      // Subagents run in isolated contexts without interactive UI — only the
+      // primary agent can request a mode change.
+      if (process.env.PI_SUBAGENT === "1") {
+        return {
+          content: [
+            { type: "text", text: "Mode changes can only be requested by the primary agent, not a subagent." },
+          ],
+        };
+      }
+      if (availableModes.length === 0 || baselineTools.length === 0) {
+        return {
+          content: [
+            { type: "text", text: "Modes not loaded yet — session not ready. Try again in a moment." },
+          ],
+        };
+      }
+      const targetId = String(params.mode ?? "").trim().toLowerCase();
+      const targetIndex = availableModes.findIndex((m) => m.id === targetId);
+      if (targetIndex === -1) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Unknown mode "${params.mode}". Available: ${availableModes.map((m) => m.id).join(", ")}.`,
+            },
+          ],
+        };
+      }
+      if (targetIndex === currentModeIndex) {
+        return {
+          content: [
+            { type: "text", text: `Already in ${availableModes[currentModeIndex].name} mode.` },
+          ],
+        };
+      }
+      if (!ctx.hasUI) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Cannot prompt for a mode change in non-interactive mode. Run \`/mode ${targetId}\` to switch manually.`,
+            },
+          ],
+        };
+      }
+      const target = availableModes[targetIndex];
+      const current = availableModes[currentModeIndex];
+      const reason = params.reason ? String(params.reason).trim() : "";
+      const body = `${current.name} → ${target.name}` + (reason ? `\n\n${reason}` : "");
+      const ok = await ctx.ui.confirm("Request mode change?", body);
+      if (!ok) {
+        return {
+          content: [
+            { type: "text", text: `Declined — staying in ${current.name} mode.` },
+          ],
+        };
+      }
+      const switched = await setMode(ctx, targetIndex);
+      if (!switched) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Mode switch to ${target.name} failed (session not ready). Try \`/mode ${targetId}\` manually.`,
+            },
+          ],
+        };
+      }
+      notifySwitch(ctx, targetIndex);
+      // End this turn and queue a fresh turn in the new mode. terminate:true
+      // skips the automatic follow-up LLM call so the LLM produces NO further
+      // output under this turn's (now-stale) system prompt. The queued
+      // sendUserMessage fires a fresh turn → before_provider_request injects
+      // the NEW mode's system prompt, so the LLM always operates under the
+      // current mode. The reason (plan summary) doubles as the kickoff.
+      const kickoff = reason || `Proceed in ${target.name} mode.`;
+      pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
+      return {
+        content: [
+          { type: "text", text: `Switched to ${target.name} mode. Continuing in ${target.name} mode.` },
+        ],
+        terminate: true,
+      };
+    },
+  });
+
+  // ── tool_call: bash read-only guard for modes declaring bashMode: readonly ─
+  // When the active mode declares read-only bash, intercept bash tool calls and
+  // block mutating commands (file writes, rm, git push, non-whitelisted commands)
+  // via a whitelist. Returns { block: true, reason } to veto; the reason is
+  // surfaced to the LLM so it can adjust. Fail-safe: if classifyBashCommand
+  // throws, pi blocks the tool (per tool_call semantics — errors block).
+  // Only applies in bashMode:readonly modes; build/orchestrator pass through.
+  pi.on("tool_call", async (event, _ctx) => {
+    const mode = availableModes[currentModeIndex];
+    if (!mode || mode.bashMode !== "readonly") return;
+    if (!isToolCallEventType("bash", event)) return;
+    const verdict = classifyBashCommand(event.input.command);
+    if (!verdict.ok) {
+      return { block: true, reason: verdict.reason ?? "Bash command blocked in read-only mode." };
+    }
   });
 
   // ── before_provider_request: inject the active mode's delegation policy ─────

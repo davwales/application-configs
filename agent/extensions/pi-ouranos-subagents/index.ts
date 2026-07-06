@@ -17,13 +17,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, getAgentDir, getMarkdownTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type AgentConfig, type AgentScope, applyAgentOverrides, applyFleet, discoverAgents, findProjectModeAgentsDir, formatAvailableAgents, getFleetAgentNames, loadActiveFleet, loadModeAgents, readActiveModeFromSettings, resolveModelInheritance } from "./agents.js";
+import { type AgentConfig, type AgentScope, applyAgentOverrides, applyFleet, discoverAgents, findProjectModeAgentsDir, formatAvailableAgents, getFleetAgentNames, loadActiveFleet, loadModeAgents, readActiveModeFromSettings, resolveInheritance } from "./agents.js";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -698,6 +698,24 @@ let cachedOrchestratorPrompt: string | null = null;
 // This captured value is only used if ctx.model is undefined in some context.
 let capturedModel: { provider: string; id: string } | undefined;
 
+// Fallback for the primary agent's current thinking level. pi.getThinkingLevel()
+// is the preferred live source; this captured value (kept fresh by the
+// thinking_level_select listener) is a defensive fallback if the runtime isn't
+// active. Mirrors the capturedModel pattern for model inheritance.
+let capturedThinking: ThinkingLevel | undefined;
+
+/** Primary agent's current thinking level, with a captured fallback.
+ *  Used by resolveInheritance() to resolve `thinking: inherit` sentinels.
+ *  pi.getThinkingLevel() can throw if the runtime isn't active yet — the
+ *  captured fallback covers that case. */
+function primaryThinkingNow(pi: ExtensionAPI): ThinkingLevel | undefined {
+	try {
+		return pi.getThinkingLevel() ?? capturedThinking;
+	} catch {
+		return capturedThinking;
+	}
+}
+
 function loadOrchestratorPrompt(): string {
 	if (cachedOrchestratorPrompt !== null) return cachedOrchestratorPrompt;
 
@@ -730,6 +748,13 @@ export default function (pi: ExtensionAPI) {
 	// a fallback for ctx.model in tool execute() (model inheritance resolution).
 	pi.on("model_select", (event) => {
 		capturedModel = { provider: event.model.provider, id: event.model.id };
+	});
+
+	// Keep capturedThinking fresh as the user changes the thinking level, so it
+	// can serve as a fallback for pi.getThinkingLevel() in inheritance resolution
+	// (mirrors the capturedModel / model_select pattern).
+	pi.on("thinking_level_select", (event) => {
+		capturedThinking = event.level;
 	});
 
 	pi.registerTool({
@@ -767,7 +792,7 @@ export default function (pi: ExtensionAPI) {
 				// ExtensionContext, which tools receive. capturedModel (kept fresh
 				// by the model_select listener below) is a defensive fallback.
 				const primaryModel = ctx.model ?? capturedModel;
-				agents = agents.map((a) => resolveModelInheritance(a, primaryModel));
+				agents = agents.map((a) => resolveInheritance(a, primaryModel, primaryThinkingNow(pi)));
 				projectAgentsDir = findProjectModeAgentsDir(ctx.cwd, activeMode);
 			} else {
 				// FALLBACK: three-layer discovery + fleet (backward compatible)
@@ -1262,7 +1287,7 @@ export default function (pi: ExtensionAPI) {
 			// Mode-scoped: describe the mode's available agents to the LLM.
 			const modeAgents = loadModeAgents(agentDir, activeMode, _ctx.cwd);
 			const primaryModel = _ctx.model ?? capturedModel;
-			const resolved = modeAgents.map((a) => resolveModelInheritance(a, primaryModel));
+			const resolved = modeAgents.map((a) => resolveInheritance(a, primaryModel, primaryThinkingNow(pi)));
 
 			// Tool visibility for the `subagent` tool is owned here, reactively,
 			// on every turn. We use the safe getActiveTools()-based filter so we

@@ -6,6 +6,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 export type AgentScope = "user" | "project" | "both";
 
@@ -63,10 +64,10 @@ function loadAgentsFromDir(dir: string, source: "user" | "project" | "package"):
 			.filter(Boolean);
 
 		let model = frontmatter.model;
-		// The "inherit" sentinel is resolved later by resolveModelInheritance()
-		// against the primary agent's model — don't fold the thinking suffix
-		// into it here.
-		if (model && model !== "inherit" && frontmatter.thinking && !model.includes(":")) {
+		// The "inherit" sentinels are resolved later by resolveInheritance()
+		// against the primary agent's model + thinking — don't fold the thinking
+		// suffix into the model here for either sentinel.
+		if (model && model !== "inherit" && frontmatter.thinking && frontmatter.thinking !== "inherit" && !model.includes(":")) {
 			model = `${model}:${frontmatter.thinking}`;
 		}
 
@@ -374,23 +375,52 @@ export function findProjectModeAgentsDir(cwd: string, modeName: string): string 
 }
 
 /**
- * Resolve the `model: inherit` sentinel to the primary agent's current model.
- * Constructs a `provider/id[:thinking]` string matching the convention used
- * by applyFleet(). If the agent's model is not "inherit", or no primary model
- * is available, the agent is returned unchanged.
+ * Resolve the `model: inherit` and `thinking: inherit` sentinels against the
+ * primary agent's currently selected model and thinking level. Constructs a
+ * `provider/id[:thinking]` string matching the convention used by applyFleet().
+ *
+ * - `model: inherit`    → primary agent's current model (`provider/id`).
+ * - `thinking: inherit` → primary agent's current thinking level.
+ *
+ * If a `model: inherit` sentinel has nothing to inherit (no primary model),
+ * the agent is returned unchanged so the sentinel stays and spawn fails loudly
+ * (same behavior as before this function handled thinking).
+ * If a `thinking: inherit` sentinel has nothing to inherit (no primary thinking
+ * level available), the suffix is dropped entirely rather than emitting
+ * `:inherit` (which would fail at spawn) — the subagent then uses the model's
+ * default thinking level.
+ *
+ * Agents with neither sentinel are returned unchanged.
  */
-export function resolveModelInheritance(
+export function resolveInheritance(
 	agent: AgentConfig,
 	primaryModel: { provider: string; id: string } | undefined,
+	primaryThinking: ThinkingLevel | undefined,
 ): AgentConfig {
-	if (agent.model !== "inherit") return agent;
-	if (!primaryModel) return agent; // nothing to inherit — keep sentinel (will fail at spawn)
+	const wantsModelInherit = agent.model === "inherit";
+	const wantsThinkingInherit = agent.thinking === "inherit";
+	if (!wantsModelInherit && !wantsThinkingInherit) return agent;
 
-	let resolvedModel = `${primaryModel.provider}/${primaryModel.id}`;
-	if (agent.thinking) {
-		resolvedModel = `${resolvedModel}:${agent.thinking}`;
+	// Resolve model.
+	let resolvedModel = agent.model;
+	if (wantsModelInherit) {
+		if (!primaryModel) return agent; // nothing to inherit — keep sentinel (will fail at spawn)
+		resolvedModel = `${primaryModel.provider}/${primaryModel.id}`;
 	}
-	return { ...agent, model: resolvedModel };
+
+	// Resolve thinking.
+	let resolvedThinking = agent.thinking;
+	if (wantsThinkingInherit) {
+		resolvedThinking = primaryThinking;
+	}
+
+	// Fold the resolved thinking into the model string as a `:level` suffix,
+	// matching applyFleet()'s convention. Only append when the model doesn't
+	// already carry a thinking suffix (e.g. an explicit `model: id:level`).
+	if (resolvedModel && resolvedThinking && !resolvedModel.includes(":")) {
+		resolvedModel = `${resolvedModel}:${resolvedThinking}`;
+	}
+	return { ...agent, model: resolvedModel, thinking: resolvedThinking };
 }
 
 export function formatAvailableAgents(agents: AgentConfig[], quoted?: boolean): string {
