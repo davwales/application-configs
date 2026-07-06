@@ -6,13 +6,13 @@
     "npm:pi-simplify",
     "npm:pi-compass",
     "npm:@dreki-gg/pi-context7",
-    "npm:pi-modes",
     "git:github.com/badlogic/pi-mono",
     "npm:@aliou/pi-guardrails",
     "npm:@juicesharp/rpiv-todo",
     "npm:@juicesharp/rpiv-ask-user-question",
     "npm:pi-powerline-footer",
-    "./agent/extensions/pi-ouranos-gitea"
+    "./agent/extensions/pi-ouranos-gitea",
+    "./agent/extensions/pi-ouranos-modes"
   ],
   "defaultProvider": "ollama-cloud",
   "defaultModel": "glm-5.2",
@@ -26,10 +26,34 @@
     }
   },
   "theme": "catppuccin-mocha",
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "xhigh",
   "compaction": {
     "enabled": true,
     "reserveTokens": 16384,
     "keepRecentTokens": 24000
+  },
+  "activeMode": "orchestrator",
+  "powerline": {
+    "customItems": [
+      {
+        "id": "mode",
+        "statusKey": "mode",
+        "position": "right",
+        "color": "accent",
+        "hideWhenMissing": true
+      }
+    ]
+  },
+  "modePrefs": {
+    "build": {
+      "provider": "ollama-cloud",
+      "modelId": "glm-5.2",
+      "thinking": "medium"
+    },
+    "orchestrator": {
+      "provider": "ollama-cloud",
+      "modelId": "glm-5.2",
+      "thinking": "xhigh"
+    }
   }
 }

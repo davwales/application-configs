@@ -63,7 +63,10 @@ function loadAgentsFromDir(dir: string, source: "user" | "project" | "package"):
 			.filter(Boolean);
 
 		let model = frontmatter.model;
-		if (model && frontmatter.thinking && !model.includes(":")) {
+		// The "inherit" sentinel is resolved later by resolveModelInheritance()
+		// against the primary agent's model — don't fold the thinking suffix
+		// into it here.
+		if (model && model !== "inherit" && frontmatter.thinking && !model.includes(":")) {
 			model = `${model}:${frontmatter.thinking}`;
 		}
 
@@ -300,6 +303,94 @@ export function applyAgentOverrides(agents: AgentConfig[], agentDir: string): Ag
 			model: model ?? agent.model,
 		};
 	});
+}
+
+function findNearestProjectModeAgentsDir(cwd: string, modeName: string): string | null {
+	let currentDir = cwd;
+	while (true) {
+		const candidate = path.join(currentDir, ".pi", "modes", modeName, "agents");
+		if (isDirectory(candidate)) return candidate;
+
+		const parentDir = path.dirname(currentDir);
+		if (parentDir === currentDir) return null;
+		currentDir = parentDir;
+	}
+}
+
+/**
+ * Read the `activeMode` key from settings.json.
+ * Returns the mode name string, or null if unset/invalid.
+ * Mirrors the settings-reading pattern of loadActiveFleet().
+ */
+export function readActiveModeFromSettings(agentDir: string): string | null {
+	try {
+		const settingsPath = path.join(agentDir, "settings.json");
+		if (!fs.existsSync(settingsPath)) return null;
+
+		const content = fs.readFileSync(settingsPath, "utf-8");
+		const settings = JSON.parse(content);
+		const mode = settings?.activeMode;
+
+		if (!mode || typeof mode !== "string" || mode.trim() === "") return null;
+
+		return mode.trim();
+	} catch (e) {
+		console.error(`[subagents] Failed to read active mode: ${e instanceof Error ? e.message : String(e)}`);
+		return null;
+	}
+}
+
+/**
+ * Load agent definitions for a given mode from the user and project layers.
+ * (Package layer is intentionally omitted: pi-ouranos-modes ships its mode
+ * directories and copies them into ~/.pi/agent/modes/ on first run, so the
+ * user layer is the base. This avoids cross-extension path coupling.)
+ *
+ * Layering (project overrides user by agent name):
+ *   - User:    ~/.pi/agent/modes/<modeName>/agents/*.md
+ *   - Project: nearest .pi/modes/<modeName>/agents/ walking up from cwd
+ *
+ * Returns an empty array if the mode has no agents (e.g. default mode).
+ */
+export function loadModeAgents(agentDir: string, modeName: string, cwd: string): AgentConfig[] {
+	const userDir = path.join(agentDir, "modes", modeName, "agents");
+	const projectDir = findNearestProjectModeAgentsDir(cwd, modeName);
+
+	const userAgents = loadAgentsFromDir(userDir, "user");
+	const projectAgents = projectDir ? loadAgentsFromDir(projectDir, "project") : [];
+
+	const agentMap = new Map<string, AgentConfig>();
+	// Layer 1: user (base)
+	for (const agent of userAgents) agentMap.set(agent.name, agent);
+	// Layer 2: project (overrides user)
+	for (const agent of projectAgents) agentMap.set(agent.name, agent);
+
+	return Array.from(agentMap.values());
+}
+
+/** Resolve the project-layer mode agents dir (nearest .pi/modes/<mode>/agents), or null. */
+export function findProjectModeAgentsDir(cwd: string, modeName: string): string | null {
+	return findNearestProjectModeAgentsDir(cwd, modeName);
+}
+
+/**
+ * Resolve the `model: inherit` sentinel to the primary agent's current model.
+ * Constructs a `provider/id[:thinking]` string matching the convention used
+ * by applyFleet(). If the agent's model is not "inherit", or no primary model
+ * is available, the agent is returned unchanged.
+ */
+export function resolveModelInheritance(
+	agent: AgentConfig,
+	primaryModel: { provider: string; id: string } | undefined,
+): AgentConfig {
+	if (agent.model !== "inherit") return agent;
+	if (!primaryModel) return agent; // nothing to inherit — keep sentinel (will fail at spawn)
+
+	let resolvedModel = `${primaryModel.provider}/${primaryModel.id}`;
+	if (agent.thinking) {
+		resolvedModel = `${resolvedModel}:${agent.thinking}`;
+	}
+	return { ...agent, model: resolvedModel };
 }
 
 export function formatAvailableAgents(agents: AgentConfig[], quoted?: boolean): string {

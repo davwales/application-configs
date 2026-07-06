@@ -23,7 +23,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, getAgentDir, getMarkdownTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type AgentConfig, type AgentScope, applyAgentOverrides, applyFleet, discoverAgents, formatAvailableAgents, getFleetAgentNames, loadActiveFleet } from "./agents.js";
+import { type AgentConfig, type AgentScope, applyAgentOverrides, applyFleet, discoverAgents, findProjectModeAgentsDir, formatAvailableAgents, getFleetAgentNames, loadActiveFleet, loadModeAgents, readActiveModeFromSettings, resolveModelInheritance } from "./agents.js";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -692,6 +692,12 @@ function renderExpandedSingle(
 
 let cachedOrchestratorPrompt: string | null = null;
 
+// Fallback for the primary agent's currently selected model. ctx.model is the
+// preferred source inside tool execute() (it is part of ExtensionContext, the
+// exact type tools receive — see ExtensionContext.model in the ExtensionAPI).
+// This captured value is only used if ctx.model is undefined in some context.
+let capturedModel: { provider: string; id: string } | undefined;
+
 function loadOrchestratorPrompt(): string {
 	if (cachedOrchestratorPrompt !== null) return cachedOrchestratorPrompt;
 
@@ -720,6 +726,12 @@ function loadOrchestratorPrompt(): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	// Keep capturedModel fresh as the user switches models, so it can serve as
+	// a fallback for ctx.model in tool execute() (model inheritance resolution).
+	pi.on("model_select", (event) => {
+		capturedModel = { provider: event.model.provider, id: event.model.id };
+	});
+
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
@@ -735,12 +747,35 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const agentScope: AgentScope = params.agentScope ?? "user";
-			const discovery = discoverAgents(ctx.cwd, agentScope);
-
-			// Apply fleet and agentOverrides from settings.json
 			const agentDir = getAgentDir();
-			const fleet = loadActiveFleet(agentDir);
-			const agents = applyAgentOverrides(applyFleet(discovery.agents, fleet), agentDir);
+
+			// Resolve the agent set. When a mode is active (set by pi-ouranos-modes
+			// via the `activeMode` key in settings.json), agents come from the
+			// mode's agent directory and each agent's `model` frontmatter is the
+			// source of model assignments. NO fleet is applied in the mode path —
+			// the fleet override layer is only for the no-mode fallback below.
+			// (Applying the user's `activeFleet` here would filter out planner/
+			// builder, which are not in any fleet, breaking Plan/Build modes.)
+			const activeMode = readActiveModeFromSettings(agentDir);
+			let agents: AgentConfig[];
+			let projectAgentsDir: string | null;
+			if (activeMode) {
+				const modeAgents = loadModeAgents(agentDir, activeMode, ctx.cwd);
+				agents = applyAgentOverrides(modeAgents, agentDir);
+				// ctx.model exposes the primary agent's currently selected model
+				// ({ provider, id }) inside tool execute() — it is part of
+				// ExtensionContext, which tools receive. capturedModel (kept fresh
+				// by the model_select listener below) is a defensive fallback.
+				const primaryModel = ctx.model ?? capturedModel;
+				agents = agents.map((a) => resolveModelInheritance(a, primaryModel));
+				projectAgentsDir = findProjectModeAgentsDir(ctx.cwd, activeMode);
+			} else {
+				// FALLBACK: three-layer discovery + fleet (backward compatible)
+				const discovery = discoverAgents(ctx.cwd, agentScope);
+				const fleet = loadActiveFleet(agentDir);
+				agents = applyAgentOverrides(applyFleet(discovery.agents, fleet), agentDir);
+				projectAgentsDir = discovery.projectAgentsDir;
+			}
 
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 
@@ -750,7 +785,7 @@ export default function (pi: ExtensionAPI) {
 			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
 
 			function makeDetails(mode: "single" | "parallel" | "chain", results: SingleResult[]): SubagentDetails {
-				return { mode, agentScope, projectAgentsDir: discovery.projectAgentsDir, results };
+				return { mode, agentScope, projectAgentsDir, results };
 			}
 
 			if (modeCount !== 1) {
@@ -778,7 +813,7 @@ export default function (pi: ExtensionAPI) {
 
 				if (projectAgentsRequested.length > 0) {
 					const names = projectAgentsRequested.map((a) => a.name).join(", ");
-					const dir = discovery.projectAgentsDir ?? "(unknown)";
+					const dir = projectAgentsDir ?? "(unknown)";
 					const ok = await ctx.ui.confirm(
 						"Run project-local agents?",
 						`Agents: ${names}\nSource: ${dir}\n\nProject agents are repo-controlled. Only continue for trusted repositories.`,
@@ -1219,25 +1254,105 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
+		const agentDir = getAgentDir();
+		const activeMode = readActiveModeFromSettings(agentDir);
+
+		if (activeMode) {
+			// ── Mode-aware branch ───────────────────────────────────────────────
+			// Mode-scoped: describe the mode's available agents to the LLM.
+			const modeAgents = loadModeAgents(agentDir, activeMode, _ctx.cwd);
+			const primaryModel = _ctx.model ?? capturedModel;
+			const resolved = modeAgents.map((a) => resolveModelInheritance(a, primaryModel));
+
+			// Tool visibility for the `subagent` tool is owned here, reactively,
+			// on every turn. We use the safe getActiveTools()-based filter so we
+			// only ever touch the `subagent` tool — never re-enable tools that
+			// pi-ouranos-modes may have disabled, never stomp its full tool set.
+			// (Verified: pi.setActiveTools is callable from before_agent_start —
+			// it is a plain ExtensionAPI method available in the closure.)
+			try {
+				const current = pi.getActiveTools();
+				if (resolved.length === 0) {
+					// No subagents in this mode — hide the subagent tool.
+					if (current.includes("subagent")) {
+						pi.setActiveTools(current.filter((n) => n !== "subagent"));
+					}
+				} else if (!current.includes("subagent")) {
+					// Mode has subagents but the tool was hidden (e.g. previous
+					// default mode) — restore it without disturbing the rest.
+					pi.setActiveTools([...current, "subagent"]);
+				}
+			} catch (err) {
+				console.warn(`[subagents] setActiveTools in before_agent_start failed: ${err}`);
+			}
+
+			let agentContext = "";
+			if (resolved.length > 0) {
+				agentContext = `\n\n## Active Mode: ${activeMode}\nThe following subagents are available: ${resolved.map((a) => a.name).join(", ")}.\nDelegate to them via the subagent tool when parallelism or isolated context adds clear value.`;
+			} else {
+				agentContext = `\n\n## Active Mode: ${activeMode}\nNo subagents are available in this mode. Handle all tasks directly.`;
+			}
+
+			// Inject the orchestrator delegation-philosophy prompt ONLY for the
+			// orchestrator mode. For other has-subagent modes (plan/build), the
+			// mode's own delegation policy — appended by pi-ouranos-modes'
+			// before_provider_request — is the primary behavioral instruction;
+			// injecting the "delegate everything" philosophy here would directly
+			// contradict the lighter-delegation intent of those modes.
+			if (activeMode === "orchestrator") {
+				// Orchestrator mode: keep CURRENT behavior — full orchestrator
+				// prompt + agent availability context.
+				const prompt = loadOrchestratorPrompt();
+				if (!prompt) return;
+				return { systemPrompt: `\n\n${prompt}${agentContext}` };
+			}
+			if (resolved.length > 0) {
+				// Non-orchestrator has-subagent mode: agent availability context
+				// ONLY — no orchestrator delegation philosophy prompt.
+				return { systemPrompt: agentContext };
+			}
+			// Zero-agent mode: UNCHANGED. The orchestrator prompt is injected
+			// here, but pi-ouranos-modes' before_provider_request REPLACEs the
+			// system prompt entirely with the mode's standalone policy, so the
+			// net effect is that only the mode policy reaches the model.
+			const prompt = loadOrchestratorPrompt();
+			if (!prompt) return;
+			return { systemPrompt: `\n\n${prompt}${agentContext}` };
+		}
+
+		// ── No-mode fallback branch (fleet-based, backward compatible) ────────
 		const prompt = loadOrchestratorPrompt();
 		if (!prompt) return;
 
-		// Load active fleet and inject agent availability
-		const agentDir = getAgentDir();
 		const fleet = loadActiveFleet(agentDir);
 		const fleetAgentNames = getFleetAgentNames(fleet);
 
-		let fleetContext = "";
+		// Mirror the mode branch's safe subagent-tool hiding: if a fleet is
+		// active but lists zero agents (restrictive fleet with empty `agents`),
+		// hide the `subagent` tool so it isn't left visible with no valid targets.
+		// Only touches `subagent`; preserves the rest of the active tool set.
+		if (fleet && Array.isArray(fleetAgentNames) && fleetAgentNames.length === 0) {
+			try {
+				const current = pi.getActiveTools();
+				if (current.includes("subagent")) {
+					pi.setActiveTools(current.filter((n) => n !== "subagent"));
+				}
+			} catch (err) {
+				console.warn(`[subagents] setActiveTools in before_agent_start failed: ${err}`);
+			}
+		}
+
+		let agentContext = "";
 		if (fleet && fleetAgentNames) {
 			// Restrictive fleet: only listed agents available
-			fleetContext = `\n\n## Active Fleet: ${fleet.name}\nThe following agents are available (others are disabled): ${fleetAgentNames.join(", ")}.\nWhen planning workflows, only delegate to these agents.`;
+			agentContext = `\n\n## Active Fleet: ${fleet.name}\nThe following agents are available (others are disabled): ${fleetAgentNames.join(", ")}.\nWhen planning workflows, only delegate to these agents.`;
 		} else if (fleet) {
 			// Permissive fleet: all agents available with overridden models
-			fleetContext = `\n\n## Active Fleet: ${fleet.name}\nAll agents are available. Model assignments from this fleet are in effect.`;
+			agentContext = `\n\n## Active Fleet: ${fleet.name}\nAll agents are available. Model assignments from this fleet are in effect.`;
 		}
 
 		return {
-			systemPrompt: `\n\n${prompt}${fleetContext}`,
+			systemPrompt: `\n\n${prompt}${agentContext}`,
 		};
 	});
 }

@@ -1,0 +1,25 @@
+{
+  "name": "pi-ouranos-modes",
+  "version": "0.2.0",
+  "description": "Mode-aware agent orchestration for Pi. Ships default/plan/build/orchestrator modes; manages activeMode in settings.json, injects per-mode delegation policy prompts, and remembers the last-selected model + thinking level per mode. Replaces pi-modes.",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "license": "MIT",
+  "author": "Ben",
+  "files": [
+    "index.ts",
+    "modes/",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}
