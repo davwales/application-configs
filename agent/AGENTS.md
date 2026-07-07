@@ -1,20 +1,8 @@
 # Agent Instructions
 
-> The **orchestrator** is the main entry-point agent (configured in `prompts/orchestrator.md`). The fleet below lists **subagents only** — specialist agents the orchestrator delegates to.
+Pi operates in **modes** (default / plan / build / orchestrator), managed by the `pi-ouranos-modes` extension. The active mode — restored from `~/.pi/agent/settings.json` at session start, switchable via `/mode` — determines the primary agent's delegation policy and which subagents (if any) are available. See `~/.pi/agent/extensions/pi-ouranos-modes/README.md` for the full mode system (tool restrictions, per-mode model+thinking memory, the `request_mode_change` handoff).
 
-## Fleet
-
-| Agent | Role |
-|-------|------|
-| `product-owner` | Requirements refinement & sign-off |
-| `architect` | Architecture design (read-only, no implementation) |
-| `researcher` | External docs & dependency research |
-| `designer` | Component/layout blueprints |
-| `scout` | Codebase reconnaissance |
-| `frontend-developer` | User-facing implementation (UIs, GUIs, CLIs — anything the user sees/touches) |
-| `backend-developer` | Systems implementation (APIs, services, domain logic, data, infrastructure) |
-| `reviewer` | Code quality review and general artifact audit |
-| `worker` | Catchall tasks (docs, config, prompts, settings, scripts, general edits) |
+Agent definitions live in `~/.pi/agent/modes/<mode>/agents/*.md` (shipped defaults seed from the modes extension). There is no global "fleet" — each mode owns its agents inline.
 
 ## Ask Questions When Unsure
 

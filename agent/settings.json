@@ -16,7 +16,6 @@
   ],
   "defaultProvider": "ollama-cloud",
   "defaultModel": "glm-5.2",
-  "activeFleet": "ollama-balanced",
   "subagents": {
     "asyncByDefault": true,
     "control": {
@@ -26,13 +25,13 @@
     }
   },
   "theme": "catppuccin-mocha",
-  "defaultThinkingLevel": "xhigh",
+  "defaultThinkingLevel": "medium",
   "compaction": {
     "enabled": true,
     "reserveTokens": 16384,
     "keepRecentTokens": 24000
   },
-  "activeMode": "plan",
+  "activeMode": "build",
   "powerline": {
     "customItems": [
       {

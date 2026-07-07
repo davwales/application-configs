@@ -74,17 +74,35 @@ const READONLY_GIT_SUBCOMMANDS = new Set([
   // am, init, clone, etc. are NOT whitelisted (they can mutate).
 ]);
 
-/** Split a bash command chain into individual command segments, handling
- *  `;`, `&&`, `||`, and `|` as separators. (Pipes inside quoted strings are
- *  not handled — over-splitting is conservative and safe.) */
+/** Split a bash command chain into individual command segments on `;`, `&&`,
+ *  `||`, and `|` that are OUTSIDE quotes — so patterns like `grep "a|b"` or
+ *  `sed 's/a;b/'` aren't split on in-quote separators. (Imperfect bash lexing —
+ *  conservative when in doubt.) */
 function splitBashChain(command: string): string[] {
-  const sentinel = "\u0000";
-  return command
-    .replace(/&&/g, sentinel)
-    .replace(/\|\|/g, sentinel)
-    .split(/[;|\u0000]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const segments: string[] = [];
+  let cur = "";
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      cur += c;
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      cur += c;
+      if (c === '"' && command[i - 1] !== "\\") quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; cur += c; continue; }
+    if (c === ";") { segments.push(cur); cur = ""; continue; }
+    if (c === "|" && command[i + 1] === "|") { segments.push(cur); cur = ""; i++; continue; }
+    if (c === "&" && command[i + 1] === "&") { segments.push(cur); cur = ""; i++; continue; }
+    if (c === "|") { segments.push(cur); cur = ""; continue; }
+    cur += c;
+  }
+  segments.push(cur);
+  return segments.map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
 /** Detect file-writing redirects (`>`, `>>`, `2>`, `&>`, `2>>`) to a real
@@ -104,6 +122,24 @@ function hasWritingRedirect(command: string): boolean {
   return false;
 }
 
+/** Extract the git subcommand from a tokenized git invocation, skipping
+ *  global options that take a value (-C <path>, -c <config>, --git-dir <path>,
+ *  --work-tree <path>, and their =/combined forms) and value-less global flags
+ *  (--no-pager, --paginate, ...). The first non-option token is the subcommand. */
+function gitSubcommand(tokens: string[]): string {
+  const valueFlags = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
+  let i = 1;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (valueFlags.has(t)) { i += 2; continue; }                   // -C <path>
+    if (t.startsWith("-C") && t.length > 2) { i += 1; continue; }  // -Cpath
+    if (t.startsWith("--") && t.includes("=")) { i += 1; continue; } // --git-dir=path
+    if (t.startsWith("--") || (t.startsWith("-") && t.length > 1)) { i += 1; continue; } // value-less flag
+    return t;
+  }
+  return "";
+}
+
 /** Classify a bash command as read-only or mutating for read-only modes.
  *  Returns { ok: true } if read-only, { ok: false, reason } if mutating. */
 function classifyBashCommand(command: string): { ok: boolean; reason?: string } {
@@ -118,7 +154,7 @@ function classifyBashCommand(command: string): { ok: boolean; reason?: string } 
     const first = tokens[0];
     if (!first) continue;
     if (first === "git") {
-      const sub = tokens[1] ?? "";
+      const sub = gitSubcommand(tokens);
       if (!READONLY_GIT_SUBCOMMANDS.has(sub)) {
         return {
           ok: false,
@@ -550,10 +586,17 @@ export default function modesExtension(pi: ExtensionAPI): void {
 
     // Tool set: baseline captured at session_start, filtered by the mode's
     // declarative tool config (frontmatter `tools:` allowlist / `excludeTools:`
-    // excludelist). We start from the captured baseline (not pi.getAllTools())
-    // so other extensions' tool disables are respected. The subagent tool's
-    // per-turn visibility is also reinforced by pi-ouranos-subagents'
-    // before_agent_start.
+    // excludelist). The baseline is the FULL set of registered tools
+    // (pi.getAllTools), NOT the currently-active set — using getActiveTools()
+    // would capture the restored active set, which after a reload that started
+    // in a restrictive mode (e.g. plan with excludeTools: write, edit) would
+    // permanently shrink the baseline and leak the exclusion into other modes.
+    // getAllTools() keeps the baseline complete so each mode's excludeTools
+    // subtracts correctly. (No other extension disables tools via
+    // setActiveTools — guardrails uses tool_call guards, subagents only toggles
+    // the `subagent` tool which computeActiveTools also manages — so this is
+    // safe.) The subagent tool's per-turn visibility is also reinforced by
+    // pi-ouranos-subagents' before_agent_start.
     const active = computeActiveTools(mode, baselineTools);
     try {
       pi.setActiveTools(active);
@@ -929,9 +972,14 @@ export default function modesExtension(pi: ExtensionAPI): void {
   // ── Bootstrap ─────────────────────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
-    // Capture baseline tool set (all extensions have registered by now).
+    // Capture the FULL set of registered tools as the baseline (not the
+    // currently-active set). Using getActiveTools() here would capture whatever
+    // is active at session_start — after a reload that started in a restrictive
+    // mode, that's the restricted set, permanently shrinking the baseline and
+    // leaking the exclusion into other modes. getAllTools() always returns the
+    // complete set, so each mode's excludeTools subtracts from the full set.
     try {
-      baselineTools = pi.getActiveTools();
+      baselineTools = pi.getAllTools().map((t) => t.name);
     } catch (err) {
       console.warn(`[modes] Failed to initialize tools: ${err}`);
       return;
