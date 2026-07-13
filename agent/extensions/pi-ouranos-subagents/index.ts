@@ -1,13 +1,11 @@
 /**
- * Subagent Tool - Delegate tasks to specialized agents
+ * Subagent Tool - Delegate a task to a specialized agent
  *
  * Spawns a separate `pi` process for each subagent invocation,
  * giving it an isolated context window.
  *
- * Supports three modes:
- *   - Single: { agent: "name", task: "..." }
- *   - Parallel: { tasks: [{ agent: "name", task: "..." }, ...] }
- *   - Chain: { chain: [{ agent: "name", task: "... {previous} ..." }, ...] }
+ * The model can parallelize by issuing multiple subagent tool calls
+ * in one message, and chain by calling subagents in succession.
  *
  * Uses JSON mode to capture structured output from subagents.
  */
@@ -25,8 +23,7 @@ import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, applyAgentOverrides, applyFleet, discoverAgents, findProjectModeAgentsDir, formatAvailableAgents, getFleetAgentNames, loadActiveFleet, loadModeAgents, readActiveModeFromSettings, resolveInheritance } from "./agents.js";
 
-const MAX_PARALLEL_TASKS = 8;
-const MAX_CONCURRENCY = 4;
+
 
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
@@ -219,12 +216,17 @@ interface SubagentDetails {
 }
 
 function getFinalOutput(messages: Message[]): string {
+	// Return all text parts of the LAST assistant message that has any text.
+	// Some providers emit multiple text blocks in a single assistant message;
+	// returning only the first would silently drop the rest.
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
 		if (msg.role === "assistant") {
+			const texts: string[] = [];
 			for (const part of msg.content) {
-				if (part.type === "text") return part.text;
+				if (part.type === "text") texts.push((part as { text: string }).text);
 			}
+			if (texts.length > 0) return texts.join("\n\n");
 		}
 	}
 	return "";
@@ -244,26 +246,6 @@ function getDisplayItems(messages: Message[]): DisplayItem[] {
 		}
 	}
 	return items;
-}
-
-async function mapWithConcurrencyLimit<TIn, TOut>(
-	items: TIn[],
-	concurrency: number,
-	fn: (item: TIn, index: number) => Promise<TOut>,
-): Promise<TOut[]> {
-	if (items.length === 0) return [];
-	const limit = Math.max(1, Math.min(concurrency, items.length));
-	const results: TOut[] = new Array(items.length);
-	let nextIndex = 0;
-	const workers = new Array(limit).fill(null).map(async () => {
-		while (true) {
-			const current = nextIndex++;
-			if (current >= items.length) return;
-			results[current] = await fn(items[current], current);
-		}
-	});
-	await Promise.all(workers);
-	return results;
 }
 
 async function writePromptToTempFile(agentName: string, prompt: string): Promise<{ dir: string; filePath: string }> {
@@ -409,11 +391,6 @@ async function runSingleAgent(
 					}
 					emitUpdate();
 				}
-
-				if (event.type === "tool_result_end" && event.message) {
-					currentResult.messages.push(event.message as Message);
-					emitUpdate();
-				}
 			};
 
 			proc.stdout.on("data", (data) => {
@@ -468,36 +445,25 @@ async function runSingleAgent(
 	}
 }
 
-const TaskItem = Type.Object({
-	agent: Type.String({ description: "Name of the agent to invoke" }),
-	task: Type.String({ description: "Task to delegate to the agent" }),
-	desc: Type.Optional(Type.String({ description: "Short one-line intent summary" })),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
-});
-
-const ChainItem = Type.Object({
-	agent: Type.String({ description: "Name of the agent to invoke" }),
-	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
-	desc: Type.Optional(Type.String({ description: "Short one-line intent summary" })),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
-});
-
 const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
 	description: 'Which agent directories to use. Default: "user". Use "both" to include project-local agents.',
 	default: "user",
 });
 
 const SubagentParams = Type.Object({
-	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
-	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
-	desc: Type.Optional(Type.String({ description: "Short one-line intent summary of what this subagent call should accomplish. Keep it under 10 words. Example: 'Check auth middleware' or 'Implement unit tests for UserService'. Always provide this." })),
-	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
-	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential execution" })),
+	agent: Type.String({ description: "Name of the agent to invoke" }),
+	task: Type.String({ description: "Task to delegate to the agent" }),
+	desc: Type.Optional(
+		Type.String({
+			description:
+				"Short one-line intent summary of what this subagent call should accomplish. Keep it under 10 words. Example: 'Check auth middleware' or 'Implement unit tests for UserService'. Always provide this.",
+		}),
+	),
 	agentScope: Type.Optional(AgentScopeSchema),
 	confirmProjectAgents: Type.Optional(
 		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
 	),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
+	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 });
 
 // ─── Render helpers ────────────────────────────────────────────────────────────
@@ -549,21 +515,6 @@ function renderCollapsedResultLines(
 	}
 
 	return lines;
-}
-
-/** Aggregate usage stats across multiple results */
-function aggregateUsage(results: SingleResult[]): UsageStats {
-	const total: UsageStats = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 };
-	for (const r of results) {
-		total.input += r.usage.input;
-		total.output += r.usage.output;
-		total.cacheRead += r.usage.cacheRead;
-		total.cacheWrite += r.usage.cacheWrite;
-		total.cost += r.usage.cost;
-		total.contextTokens += r.usage.contextTokens;
-		total.turns += r.usage.turns;
-	}
-	return total;
 }
 
 /** Build the collapsed preview for a single agent result (multi-line, opencode-style)
@@ -761,8 +712,9 @@ export default function (pi: ExtensionAPI) {
 		name: "subagent",
 		label: "Subagent",
 		description: [
-			"Delegate tasks to specialized subagents with isolated context.",
-			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
+			"Delegate a task to a specialized subagent with an isolated context window.",
+			"To run multiple subagents in parallel, issue multiple subagent tool calls in the same message.",
+			"To chain subagents, call them in succession, passing relevant context from each result into the next call's task.",
 			"Always provide 'desc' with a short one-line intent summary (under 10 words) for what this call should accomplish.",
 			'Default agent scope is "user" (from ~/.pi/agent/agents).',
 			'To enable project-local agents in .pi/agents, set agentScope: "both" (or "project").',
@@ -804,32 +756,22 @@ export default function (pi: ExtensionAPI) {
 
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 
-			const hasChain = (params.chain?.length ?? 0) > 0;
-			const hasTasks = (params.tasks?.length ?? 0) > 0;
-			const hasSingle = Boolean(params.agent && params.task);
-			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
-
-			function makeDetails(mode: "single" | "parallel" | "chain", results: SingleResult[]): SubagentDetails {
-				return { mode, agentScope, projectAgentsDir, results };
+			function makeDetails(results: SingleResult[]): SubagentDetails {
+				return { mode: "single", agentScope, projectAgentsDir, results };
 			}
 
-			if (modeCount !== 1) {
+			if (!params.agent || !params.task) {
 				const available = formatAvailableAgents(agents);
 				return {
 					content: [
-						{
-							type: "text",
-							text: `Invalid parameters. Provide exactly one mode.\nAvailable agents: ${available}`,
-						},
+						{ type: "text", text: `Invalid parameters. Provide 'agent' and 'task'.\nAvailable agents: ${available}` },
 					],
-					details: makeDetails("single", []),
+					details: makeDetails([]),
 				};
 			}
 
 			if ((agentScope === "project" || agentScope === "both") && confirmProjectAgents && ctx.hasUI) {
 				const requestedAgentNames = new Set<string>();
-				if (params.chain) for (const step of params.chain) requestedAgentNames.add(step.agent);
-				if (params.tasks) for (const t of params.tasks) requestedAgentNames.add(t.agent);
 				if (params.agent) requestedAgentNames.add(params.agent);
 
 				const projectAgentsRequested = Array.from(requestedAgentNames)
@@ -846,208 +788,39 @@ export default function (pi: ExtensionAPI) {
 					if (!ok)
 						return {
 							content: [{ type: "text", text: "Canceled: project-local agents not approved." }],
-							details: makeDetails(hasChain ? "chain" : hasTasks ? "parallel" : "single", []),
+							details: makeDetails([]),
 						};
 				}
 			}
 
-			if (params.chain && params.chain.length > 0) {
-				const results: SingleResult[] = [];
-				let previousOutput = "";
-
-				for (let i = 0; i < params.chain.length; i++) {
-					const step = params.chain[i];
-					const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
-
-					// Create update callback that includes all previous results
-					const chainUpdate: OnUpdateCallback | undefined = onUpdate
-						? (partial) => {
-								// Combine completed results with current streaming result
-								const currentResult = partial.details?.results[0];
-								if (currentResult) {
-									const allResults = [...results, currentResult];
-									onUpdate({
-										content: partial.content,
-										details: makeDetails("chain", allResults),
-									});
-								}
-							}
-						: undefined;
-
-					const result = await runSingleAgent(
-						ctx.cwd,
-						agents,
-						step.agent,
-						taskWithContext,
-						step.desc || truncateTask(taskWithContext, 70),
-						step.cwd,
-						i + 1,
-						signal,
-						chainUpdate,
-						(r) => makeDetails("chain", r),
-					);
-					results.push(result);
-
-					const isError = isSubagentError(result);
-					if (isError) {
-						const errorMsg =
-							result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
-						return {
-							content: [{ type: "text", text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}` }],
-							details: makeDetails("chain", results),
-							isError: true,
-						};
-					}
-					previousOutput = getFinalOutput(result.messages);
-				}
+			const result = await runSingleAgent(
+				ctx.cwd,
+				agents,
+				params.agent,
+				params.task,
+				params.desc || truncateTask(params.task || "", 70),
+				params.cwd,
+				undefined,
+				signal,
+				onUpdate,
+				(r) => makeDetails(r),
+			);
+			const isError = isSubagentError(result);
+			if (isError) {
+				const errorMsg =
+					result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
 				return {
-					content: [{ type: "text", text: getFinalOutput(results[results.length - 1].messages) || "(no output)" }],
-					details: makeDetails("chain", results),
+					content: [{ type: "text", text: `Agent ${result.stopReason || "failed"}: ${errorMsg}` }],
+					details: makeDetails([result]),
+					isError: true,
 				};
 			}
-
-			if (params.tasks && params.tasks.length > 0) {
-				if (params.tasks.length > MAX_PARALLEL_TASKS)
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Too many parallel tasks (${params.tasks.length}). Max is ${MAX_PARALLEL_TASKS}.`,
-							},
-						],
-						details: makeDetails("parallel", []),
-					};
-
-				// Track all results for streaming updates
-				const allResults: SingleResult[] = new Array(params.tasks.length);
-
-				// Initialize placeholder results
-				for (let i = 0; i < params.tasks.length; i++) {
-					allResults[i] = {
-						agent: params.tasks[i].agent,
-						agentDescription: "",
-						displayDesc: params.tasks[i].desc || "",
-						agentSource: "unknown",
-						task: params.tasks[i].task,
-						exitCode: -1, // -1 = still running
-						messages: [],
-						startedAt: Date.now(),
-						stderr: "",
-						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-					};
-				}
-
-				const emitParallelUpdate = () => {
-					if (onUpdate) {
-						const running = allResults.filter((r) => r.exitCode === -1).length;
-						const done = allResults.filter((r) => r.exitCode !== -1).length;
-						onUpdate({
-							content: [
-								{ type: "text", text: `Parallel: ${done}/${allResults.length} done, ${running} running...` },
-							],
-							details: makeDetails("parallel", [...allResults]),
-						});
-					}
-				};
-
-				const results = await mapWithConcurrencyLimit(params.tasks, MAX_CONCURRENCY, async (t, index) => {
-					const result = await runSingleAgent(
-						ctx.cwd,
-						agents,
-						t.agent,
-						t.task,
-						t.desc || truncateTask(t.task, 70),
-						t.cwd,
-						undefined,
-						signal,
-						// Per-task update callback
-						(partial) => {
-							if (partial.details?.results[0]) {
-								allResults[index] = partial.details.results[0];
-								emitParallelUpdate();
-							}
-						},
-						(r) => makeDetails("parallel", r),
-					);
-					allResults[index] = result;
-					emitParallelUpdate();
-					return result;
-				});
-
-				const successCount = results.filter((r) => r.exitCode === 0).length;
-				const summaries = results.map((r) => {
-					const output = getFinalOutput(r.messages);
-					const preview = output.slice(0, 100) + (output.length > 100 ? "..." : "");
-					return `[${r.agent}] ${r.exitCode === 0 ? "completed" : "failed"}: ${preview || "(no output)"}`;
-				});
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n")}`,
-						},
-					],
-					details: makeDetails("parallel", results),
-				};
-			}
-
-			if (params.agent && params.task) {
-				const result = await runSingleAgent(
-					ctx.cwd,
-					agents,
-					params.agent,
-					params.task,
-					params.desc || truncateTask(params.task || "", 70),
-					params.cwd,
-					undefined,
-					signal,
-					onUpdate,
-					(r) => makeDetails("single", r),
-				);
-				const isError = isSubagentError(result);
-				if (isError) {
-					const errorMsg =
-						result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
-					return {
-						content: [{ type: "text", text: `Agent ${result.stopReason || "failed"}: ${errorMsg}` }],
-						details: makeDetails("single", [result]),
-						isError: true,
-					};
-				}
-				return {
-					content: [{ type: "text", text: getFinalOutput(result.messages) || "(no output)" }],
-					details: makeDetails("single", [result]),
-				};
-			}
-
-			const available = formatAvailableAgents(agents);
 			return {
-				content: [{ type: "text", text: `Invalid parameters. Available agents: ${available}` }],
-				details: makeDetails("single", []),
+				content: [{ type: "text", text: getFinalOutput(result.messages) || "(no output)" }],
+				details: makeDetails([result]),
 			};
 		},
-
 		renderCall(args, theme, _context) {
-			const scope: AgentScope = args.agentScope ?? "user";
-
-			// Chain mode: compact one-liner with arrows
-			if (args.chain && args.chain.length > 0) {
-				const steps = args.chain.map((s: any) => s.agent);
-				const arrow = theme.fg("muted", " → ");
-				let text = theme.fg("toolTitle", "subagent") + " ";
-				text += theme.fg("muted", "chain: ") + steps.map((s: string) => theme.fg("accent", s)).join(arrow);
-				return new Text(text, 0, 0);
-			}
-
-			// Parallel mode
-			if (args.tasks && args.tasks.length > 0) {
-				const names = args.tasks.map((t: any) => t.agent).join(", ");
-				let text = theme.fg("toolTitle", "subagent") + " ";
-				text += theme.fg("muted", "parallel: ") + theme.fg("accent", names);
-				return new Text(text, 0, 0);
-			}
-
-			// Single agent - just show name, renderResult will show the full layout
 			const agentName = args.agent || "...";
 			let text = theme.fg("toolTitle", "subagent: ") + theme.fg("accent", agentName);
 			return new Text(text, 0, 0);
@@ -1091,176 +864,6 @@ export default function (pi: ExtensionAPI) {
 					const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
 					const lines = renderCollapsedSingle(r, theme.fg.bind(theme), theme.bold.bind(theme), isRunning, isRunning ? stepElapsed : undefined);
 					return new Text(lines, 0, 0);
-				}
-
-				// ── Chain mode ─────────────────────────────────────────────────────
-				if (details.mode === "chain") {
-					if (expanded) {
-						const container = new Container();
-						container.addChild(
-							new Text(
-								theme.fg("toolTitle", theme.bold("chain ")) +
-									theme.fg("accent", `${details.results.filter((rr) => rr.exitCode === 0).length}/${details.results.length} steps`),
-								0,
-								0,
-							),
-						);
-
-						for (const r of details.results) {
-							const isRunning = isPartial && r.exitCode === -1;
-							const rIcon = isRunning
-								? theme.fg("warning", "●")
-								: r.exitCode !== 0
-									? theme.fg("error", "✗")
-									: theme.fg("success", "✓");
-
-							container.addChild(new Spacer(1));
-							container.addChild(
-								new Text(
-									`${theme.fg("muted", `─── ${rIcon} Step ${r.step}: `)}${theme.fg("accent", r.agent)}`,
-									0,
-									0,
-								),
-							);
-
-							// Show the task for this chain step
-							if (r.task) {
-								container.addChild(new Spacer(1));
-								container.addChild(new Text(theme.fg("muted", "  ─── Task ───"), 0, 0));
-								container.addChild(new Markdown(r.task.trim(), 0, 0, mdTheme));
-							}
-
-							if (isRunning) {
-								const calls = countToolCalls(r.messages);
-								const turnsStr = calls > 0 ? ` ${calls} turn${calls !== 1 ? "s" : ""}` : "";
-								const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
-							const elapsedStr = ` ${formatDuration(stepElapsed)}`;
-								container.addChild(new Text(theme.fg("dim", `${turnsStr}${elapsedStr}`), 0, 0));
-								const preview = getLastActionPreview(r.messages);
-								if (preview) container.addChild(new Text(theme.fg("dim", `  ${preview}`), 0, 0));
-							} else {
-								// Show conversation turns
-								const items = getDisplayItems(r.messages || []);
-								let turnCount = 0;
-								for (const item of items) {
-									if (item.type === "thinking") {
-										const truncated = item.text.length > 200 ? item.text.slice(0, 200) + "..." : item.text;
-										container.addChild(new Text(theme.fg("dim", "  ── Thinking ──"), 0, 0));
-										container.addChild(new Text(theme.fg("dim", `  ${truncated}`), 0, 0));
-									} else if (item.type === "toolCall") {
-										turnCount++;
-										container.addChild(
-											new Text(
-												theme.fg("muted", `  Turn ${turnCount}: → `) +
-													formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-												0,
-												0,
-											),
-										);
-									}
-								}
-								const finalOutput = getFinalOutput(r.messages);
-								if (finalOutput) {
-									container.addChild(new Spacer(1));
-									container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
-								}
-							}
-						}
-
-						// Aggregate usage
-						const usageStr = formatUsageStats(aggregateUsage(details.results));
-						if (usageStr) {
-							container.addChild(new Spacer(1));
-							container.addChild(new Text(theme.fg("dim", `= ${usageStr}`), 0, 0));
-						}
-
-						return container;
-					}
-
-					// Collapsed chain: multi-line per step
-					const lines: string[] = [];
-					for (const r of details.results) {
-						const stepRunning = isPartial && r.exitCode === -1;
-						const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
-						lines.push(...renderCollapsedResultLines(r, stepRunning, stepRunning ? stepElapsed : undefined, theme.fg.bind(theme), theme.bold.bind(theme)));
-					}
-					return new Text(lines.join("\n"), 0, 0);
-				}
-
-				// ── Parallel mode ──────────────────────────────────────────────────
-				if (details.mode === "parallel") {
-					const running = details.results.filter((r) => r.exitCode === -1).length;
-
-					if (expanded && running === 0) {
-						const container = new Container();
-						container.addChild(
-							new Text(
-								theme.fg("toolTitle", theme.bold("parallel ")) +
-									theme.fg("accent", `${details.results.filter((r) => r.exitCode === 0).length}/${details.results.length} tasks`),
-								0,
-								0,
-							),
-						);
-
-						for (const r of details.results) {
-							const rIcon = r.exitCode !== 0 ? theme.fg("error", "✗") : theme.fg("success", "✓");
-							container.addChild(new Spacer(1));
-							container.addChild(
-								new Text(`${theme.fg("muted", `─── ${rIcon} `)}${theme.fg("accent", r.agent)}`, 0, 0),
-							);
-
-							// Show the task for this parallel task
-							if (r.task) {
-								container.addChild(new Spacer(1));
-								container.addChild(new Text(theme.fg("muted", "  ─── Task ───"), 0, 0));
-								container.addChild(new Markdown(r.task.trim(), 0, 0, mdTheme));
-							}
-
-							// Show conversation turns
-							const items = getDisplayItems(r.messages || []);
-							let turnCount = 0;
-							for (const item of items) {
-								if (item.type === "thinking") {
-									const truncated = item.text.length > 200 ? item.text.slice(0, 200) + "..." : item.text;
-									container.addChild(new Text(theme.fg("dim", "  ── Thinking ──"), 0, 0));
-									container.addChild(new Text(theme.fg("dim", `  ${truncated}`), 0, 0));
-								} else if (item.type === "toolCall") {
-									turnCount++;
-									container.addChild(
-										new Text(
-											theme.fg("muted", `  Turn ${turnCount}: → `) +
-												formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-											0,
-											0,
-										),
-									);
-								}
-							}
-							const finalOutput = getFinalOutput(r.messages);
-							if (finalOutput) {
-								container.addChild(new Spacer(1));
-								container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
-							}
-						}
-
-						// Aggregate usage
-						const usageStr = formatUsageStats(aggregateUsage(details.results));
-						if (usageStr) {
-							container.addChild(new Spacer(1));
-							container.addChild(new Text(theme.fg("dim", `= ${usageStr}`), 0, 0));
-						}
-
-						return container;
-					}
-
-					// Collapsed parallel: multi-line per agent
-					const lines: string[] = [];
-					for (const r of details.results) {
-						const isRunning = isPartial || r.exitCode === -1;
-						const stepElapsed = r.startedAt ? Math.round((Date.now() - r.startedAt) / 1000) : elapsed;
-						lines.push(...renderCollapsedResultLines(r, isRunning, isRunning ? stepElapsed : undefined, theme.fg.bind(theme), theme.bold.bind(theme)));
-					}
-					return new Text(lines.join("\n"), 0, 0);
 				}
 
 				const text = result.content[0];
