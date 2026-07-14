@@ -5,6 +5,9 @@ agent/auth.json
 agent/run-history.jsonl
 agent/sessions/
 
+# Modes local-only state (per-machine current mode — must not sync)
+agent/.modes-state.json
+
 # Cached Data
 agent/cache/
 agent/extensions/context7/cache/

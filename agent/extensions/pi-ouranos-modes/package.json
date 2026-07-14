@@ -1,7 +1,7 @@
 {
   "name": "pi-ouranos-modes",
   "version": "0.2.0",
-  "description": "Mode-aware agent orchestration for Pi. Ships default/plan/build/orchestrator modes; manages activeMode in settings.json, injects per-mode delegation policy prompts, and remembers the last-selected model + thinking level per mode. Replaces pi-modes.",
+  "description": "Mode-aware agent orchestration for Pi. Ships default/plan/build/orchestrator modes; manages activeMode in a local-only .modes-state.json (not synced across machines), injects per-mode delegation policy prompts, and remembers the last-selected model + thinking level per mode (modePrefs in settings.json — synced). Replaces pi-modes.",
   "type": "module",
   "keywords": [
     "pi-package"

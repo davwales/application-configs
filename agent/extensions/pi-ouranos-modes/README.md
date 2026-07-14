@@ -7,7 +7,7 @@ Mode-aware agent orchestration for the [Pi coding agent](https://github.com/eare
 | Mode | Subagents | Purpose |
 |------|-----------|---------|
 | `default` | none — primary works solo | Focused, direct work; subagent tool hidden. |
-| `plan` | `planner` (general-purpose, read-only) | Read-only planning & research; write the plan to `PLAN.md`. |
+| `plan` | `planner` (general-purpose, read-only) | Read-only planning & research; present the plan in your chat response. |
 | `build` | `builder` (general-purpose, read+write) | Implementation with parallelizable sub-tasks. |
 | `orchestrator` | all 9 specialists | Full delegation — today's default behavior. |
 
@@ -15,11 +15,11 @@ Mode-aware agent orchestration for the [Pi coding agent](https://github.com/eare
 
 ## How it works
 
-- The extension owns the `activeMode` key in `~/.pi/agent/settings.json`. `pi-ouranos-subagents` reads it in its subagent tool `execute()` and `before_agent_start` to decide which agent definitions to load.
+- The extension owns the `activeMode` key in `~/.pi/agent/.modes-state.json` — a **local-only, gitignored** file (the active mode is per-session/per-machine state and must NOT sync across machines, otherwise every mode switch causes a merge conflict in the synced `settings.json`). `pi-ouranos-subagents` reads it in its subagent tool `execute()` and `before_agent_start` to decide which agent definitions to load. On first run after upgrade, any pre-existing `activeMode` in `~/.pi/agent/settings.json` is migrated out to `.modes-state.json` and stripped from `settings.json` (one-time, idempotent). The extension does NOT touch `activeFleet`.
 - **When a mode is active**, `pi-ouranos-subagents` loads agents from `~/.pi/agent/modes/<mode>/agents/*.md` (and project `.pi/modes/<mode>/agents/`) and uses each agent's `model` frontmatter — **no fleet is applied**. The `model: inherit` sentinel is resolved to the primary agent's currently selected model.
 - **When no mode is active** (e.g. the extension is uninstalled), `pi-ouranos-subagents` falls back to the existing three-layer discovery + `activeFleet` behavior. The user's `activeFleet` setting is left untouched and simply ignored whenever a mode is active.
 - The active mode's delegation-policy prompt is injected via `before_provider_request`: **replaced** for no-subagent modes (default — suppresses the orchestrator "delegate everything" prompt), **appended** for has-subagent modes (plan/build/orchestrator).
-- **Per-mode model + thinking memory** (see below): each mode remembers the model and thinking level you last used while it was active, stored under the `modePrefs` key in `settings.json` and restored on every mode switch (including session start).
+- **Per-mode model + thinking memory** (see below): each mode remembers the model and thinking level you last used while it was active, stored under the `modePrefs` key in `settings.json` (synced across machines, since model choices should be consistent) and restored on every mode switch (including session start).
 
 ## Per-Mode Model & Thinking Memory
 
@@ -80,21 +80,22 @@ The extension registers a `request_mode_change` tool the primary agent can call 
 
 Parameters:
 - `mode` (string, required) — target mode id (`"default"`, `"plan"`, `"build"`, `"orchestrator"`, or any custom mode id). Validated at runtime.
-- `reason` (string, optional) — the plan or a readable summary, shown in the confirmation popup so the user can review it while deciding. Also delivered to the next mode as its kickoff instruction.
+
+The tool takes **only** `mode` — there is no `reason`/plan parameter. The full plan or context stays in the prior assistant response and carries through the conversation; the new mode reads it from there. Echoing the plan into a tool parameter would just duplicate it in the chat window (tool-call entries render their parameters) and clutter the view — so the parameter was removed. The confirmation popup is a single line: `Plan → Build?` (current → target) with Yes/No buttons.
 
 The tool is part of the baseline tool set, so it is active in every mode. Only the primary agent calls it: subagents run isolated without interactive UI, and their tool set is restricted to their frontmatter `tools:` list (which won't include this tool). The execute handler refuses if invoked from a subagent context (`PI_SUBAGENT=1`) or when there's no interactive UI (`!ctx.hasUI`), telling the user to run `/mode <name>` manually instead.
 
-**System-prompt correctness:** on approval the tool switches the mode and ends the current turn (`terminate: true` — the LLM produces no further output under the now-stale old-mode prompt) while queueing a fresh turn in the new mode (`pi.sendUserMessage` with `deliverAs: "followUp"`). The fresh turn gets a new `before_provider_request`, so the LLM always operates under the current mode's system prompt. The `reason` doubles as the kickoff for that turn.
+**System-prompt correctness:** on approval the tool switches the mode and ends the current turn (`terminate: true` — the LLM produces no further output under the now-stale old-mode prompt) while queueing a fresh turn in the new mode (`pi.sendUserMessage` with `deliverAs: "followUp"`). The fresh turn gets a new `before_provider_request`, so the LLM always operates under the current mode's system prompt. The kickoff is a generic `Proceed in <mode> mode.` — the full plan/context lives in the preceding assistant turn, which the new mode's prompt tells it to read.
 
 Mode prompts nudge its use:
-- **plan** mode: present the plan in your response, then call `request_mode_change({ mode: "build", reason: "<plan summary>" })` so the user can read the plan in the popup and switch to execute it.
-- **build** mode: on unexpected complexity that needs planning, call `request_mode_change({ mode: "plan", reason })`.
+- **plan** mode: present the full plan in your response, then call `request_mode_change({ mode: "build" })` — the user is prompted with a single-line `Plan → Build?` popup, and the plan carries through the conversation to build mode.
+- **build** mode: on unexpected complexity that needs planning, call `request_mode_change({ mode: "plan" })`.
 
 ## Working Artifacts (`.local/`)
 
 Mode prompts instruct agents to write working/reference markdown files (notes, traces, scratch output — anything that is not part of the implementation) to a `.local/` directory at the project root. This directory is intended to be gitignored, keeping the repo tree pristine while giving agents writable scratch space inside the working directory (subagents can't write outside the CWD).
 
-- Plan mode is **read-only** (see Tool Restriction) — it does not write files. The plan is presented as conversation output and carried into build mode via `request_mode_change`.
+- Plan mode is **read-only** (see Tool Restriction) — it does not write files. The plan is presented as conversation output (the assistant response) and carries through the conversation to build mode, which reads it from the prior assistant turn. The `request_mode_change` tool call itself stays minimal (just the `mode` parameter) so it doesn't clutter the chat.
 - Build mode's working artifacts (and the `builder` agent's auxiliary files) go to `.local/`.
 - Implementation files go in their normal project locations — only auxiliary artifacts use `.local/`.
 

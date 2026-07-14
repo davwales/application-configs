@@ -319,11 +319,36 @@ function findNearestProjectModeAgentsDir(cwd: string, modeName: string): string 
 }
 
 /**
- * Read the `activeMode` key from settings.json.
+ * Read the active mode id.
+ *
+ * Tries the local-only `.modes-state.json` first — the current location
+ * managed by pi-ouranos-modes (the active mode is per-session/per-machine
+ * state, so it must NOT live in settings.json, which syncs across machines
+ * and would cause merge conflicts on every mode switch). Falls back to
+ * `settings.json` for backward compatibility with pre-migration installs
+ * (machines running an older pi-ouranos-modes that still writes
+ * `activeMode` to settings.json).
+ *
  * Returns the mode name string, or null if unset/invalid.
  * Mirrors the settings-reading pattern of loadActiveFleet().
  */
 export function readActiveModeFromSettings(agentDir: string): string | null {
+	// 1. Try the local-only state file (current location).
+	try {
+		const localStatePath = path.join(agentDir, ".modes-state.json");
+		if (fs.existsSync(localStatePath)) {
+			const content = fs.readFileSync(localStatePath, "utf-8");
+			const state = JSON.parse(content);
+			const mode = state?.activeMode;
+			if (mode && typeof mode === "string" && mode.trim() !== "") {
+				return mode.trim();
+			}
+		}
+	} catch (e) {
+		console.error(`[subagents] Failed to read .modes-state.json: ${e instanceof Error ? e.message : String(e)}`);
+	}
+
+	// 2. Fall back to settings.json (pre-migration / older pi-ouranos-modes).
 	try {
 		const settingsPath = path.join(agentDir, "settings.json");
 		if (!fs.existsSync(settingsPath)) return null;
@@ -336,7 +361,7 @@ export function readActiveModeFromSettings(agentDir: string): string | null {
 
 		return mode.trim();
 	} catch (e) {
-		console.error(`[subagents] Failed to read active mode: ${e instanceof Error ? e.message : String(e)}`);
+		console.error(`[subagents] Failed to read active mode from settings.json: ${e instanceof Error ? e.message : String(e)}`);
 		return null;
 	}
 }

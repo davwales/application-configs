@@ -727,12 +727,14 @@ export default function (pi: ExtensionAPI) {
 			const agentDir = getAgentDir();
 
 			// Resolve the agent set. When a mode is active (set by pi-ouranos-modes
-			// via the `activeMode` key in settings.json), agents come from the
-			// mode's agent directory and each agent's `model` frontmatter is the
-			// source of model assignments. NO fleet is applied in the mode path —
-			// the fleet override layer is only for the no-mode fallback below.
-			// (Applying the user's `activeFleet` here would filter out planner/
-			// builder, which are not in any fleet, breaking Plan/Build modes.)
+			// via the `activeMode` key in .modes-state.json — a local-only,
+			// gitignored file; see readActiveModeFromSettings for the settings.json
+			// fallback), agents come from the mode's agent directory and each
+			// agent's `model` frontmatter is the source of model assignments. NO
+			// fleet is applied in the mode path — the fleet override layer is only
+			// for the no-mode fallback below. (Applying the user's `activeFleet`
+			// here would filter out planner/builder, which are not in any fleet,
+			// breaking Plan/Build modes.)
 			const activeMode = readActiveModeFromSettings(agentDir);
 			let agents: AgentConfig[];
 			let projectAgentsDir: string | null;

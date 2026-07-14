@@ -7,9 +7,14 @@
  * copied into `~/.pi/agent/modes/` (missing only — user edits are preserved).
  *
  * This extension owns:
- *   - the `activeMode` key in `~/.pi/agent/settings.json` (the handoff to
- *     pi-ouranos-subagents, which reads it in its subagent tool `execute()`
- *     and `before_agent_start`). It does NOT touch `activeFleet`.
+ *   - the `activeMode` key in `~/.pi/agent/.modes-state.json` — a LOCAL-ONLY,
+ *     gitignored file (the active mode is per-session/per-machine state and
+ *     must NOT sync across machines). pi-ouranos-subagents reads it in its
+ *     subagent tool `execute()` and `before_agent_start` to decide which agent
+ *     definitions to load. On first run after upgrade, any pre-existing
+ *     `activeMode` in `~/.pi/agent/settings.json` is migrated out to
+ *     `.modes-state.json` and stripped from settings.json (one-time). It does
+ *     NOT touch `activeFleet`.
  *   - the active tool set (computed at session start / mode switch; hides the
  *     `subagent` tool when the active mode has zero agents).
  *   - per-mode delegation-policy prompt injection via `before_provider_request`
@@ -20,10 +25,11 @@
  *     compositor slot is owned by powerline-footer — single-slot, last-writer-wins).
  *   - per-mode model + thinking memory: listens to model_select /
  *     thinking_level_select and persists the active mode's last-selected
- *     model + thinking under the modePrefs key in settings.json; restores
- *     them on every mode switch (including session start). The --model /
- *     --thinking CLI flags are overridden by the active mode's saved pref at
- *     startup (use /model after startup, which updates the pref).
+ *     model + thinking under the modePrefs key in settings.json (synced across
+ *     machines, since model choices should be consistent); restores them on
+ *     every mode switch (including session start). The --model / --thinking
+ *     CLI flags are overridden by the active mode's saved pref at startup
+ *     (use /model after startup, which updates the pref).
  *
  * Replaces the npm pi-modes extension.
  */
@@ -420,6 +426,7 @@ export default function modesExtension(pi: ExtensionAPI): void {
   // activeFleet, theme, …).
 
   const settingsPath = path.join(agentDir, "settings.json");
+  const localStatePath = path.join(agentDir, ".modes-state.json");
 
   function readSettings(): Record<string, unknown> | null {
     try {
@@ -446,21 +453,71 @@ export default function modesExtension(pi: ExtensionAPI): void {
     }
   }
 
-  // ── settings.json atomic write (activeMode only) ──────────────────────────
+  // ── .modes-state.json read / atomic write (activeMode — local-only) ─────────
+  // The active mode is per-session/per-machine state, so it lives in a
+  // gitignored file (NOT settings.json, which syncs across machines and would
+  // cause merge conflicts on every mode switch). The file holds a small JSON
+  // object so future local-only keys can be added without re-reading.
+
+  function readLocalState(): Record<string, unknown> | null {
+    try {
+      return JSON.parse(fs.readFileSync(localStatePath, "utf-8")) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeLocalState(state: Record<string, unknown>): boolean {
+    const tmp = localStatePath + ".tmp";
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
+      fs.renameSync(tmp, localStatePath);
+      return true;
+    } catch (err) {
+      console.warn(`[modes] Failed to persist .modes-state.json: ${err}`);
+      try {
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      } catch {
+        /* ignore */
+      }
+      return false;
+    }
+  }
+
+  // ── activeMode persistence (local-only) ────────────────────────────────────
+  // Writes the active mode id to .modes-state.json (gitignored). If the local
+  // file doesn't exist yet, initializes it. Other keys already present are
+  // preserved (forward-compat for additional local-only state).
 
   function writeActiveMode(modeId: string): void {
-    const settings = readSettings();
-    if (!settings) {
-      // Data-loss safety: see readSettings. Log and bail; the mode switch
-      // still takes effect for this session (in-memory currentModeIndex).
-      console.warn(
-        `[modes] Could not read/parse ${settingsPath}; not persisting activeMode to avoid clobbering existing settings.`,
-      );
+    const existing = readLocalState();
+    if (!existing) {
+      writeLocalState({ activeMode: modeId });
       return;
     }
-    settings.activeMode = modeId;
-    // Do NOT touch activeFleet — the user's existing fleet setting is left
-    // alone and simply ignored by pi-ouranos-subagents whenever a mode is active.
+    existing.activeMode = modeId;
+    writeLocalState(existing);
+  }
+
+  /** One-time migration: move `activeMode` from settings.json (synced) to
+   *  .modes-state.json (local-only). Idempotent — safe to call every
+   *  session_start. If .modes-state.json already exists, only strips the stale
+   *  `activeMode` from settings.json (does NOT overwrite local state, which is
+   *  the source of truth post-migration). If .modes-state.json doesn't exist
+   *  yet, copies the settings.json value in first. */
+  function migrateActiveModeFromSettings(): void {
+    const settings = readSettings();
+    if (!settings) return;
+    const settingsActiveMode = settings.activeMode;
+    if (typeof settingsActiveMode !== "string" || !settingsActiveMode.trim()) return; // nothing to migrate
+
+    const local = readLocalState();
+    if (!local) {
+      // First migration: copy activeMode into the new local file.
+      writeLocalState({ activeMode: settingsActiveMode.trim() });
+    }
+    // Either way: strip activeMode from settings.json so it stops syncing.
+    delete settings.activeMode;
     writeSettings(settings);
   }
 
@@ -703,15 +760,23 @@ export default function modesExtension(pi: ExtensionAPI): void {
 
   // ── request_mode_change tool ──────────────────────────────────────────────
   // Lets the primary agent suggest a mode change (e.g. plan→build once the
-  // plan is written to .local/PLAN.md). Prompts the user via ctx.ui.confirm
-  // and, on approval, calls setMode to switch immediately — same path as the
-  // /mode command, so the switch restores the target mode's saved model +
-  // thinking and updates the active tool set. Refuses in subagent contexts
-  // (they run isolated without interactive UI). The tool lives in the
-  // baseline tool set captured at session_start, so it is active in every
-  // mode; only the primary agent (which has all tools) calls it — subagents'
-  // tools are restricted to their frontmatter `tools:` list, which won't
-  // include this.
+  // plan is presented in the assistant response). Prompts the user via
+  // ctx.ui.select (used directly instead of ctx.ui.confirm to avoid the
+  // latter's forced `title + "\n" + message` join, which always renders a
+  // trailing blank line) — a single-line popup showing `Plan → Build?` — and, on
+  // approval, calls setMode to switch immediately (same path as /mode, so the
+  // switch restores the target mode's saved model + thinking and updates the
+  // active tool set). The full plan/context stays in the prior assistant
+  // response and carries through the conversation; the new mode reads it from
+  // there. The tool takes ONLY `mode` (no `reason`/plan parameter) so the
+  // tool-call entry in the chat history stays minimal — the plan was already
+  // written in the assistant response above and would just be duplicated
+  // (and clutter the chat window) if echoed into a parameter.
+  // Refuses in subagent contexts (they run isolated without interactive UI).
+  // The tool lives in the baseline tool set captured at session_start, so it
+  // is active in every mode; only the primary agent (which has all tools)
+  // calls it — subagents' tools are restricted to their frontmatter `tools:`
+  // list, which won't include this.
   pi.registerTool({
     name: "request_mode_change",
     label: "Request Mode Change",
@@ -720,21 +785,17 @@ export default function modesExtension(pi: ExtensionAPI): void {
       'Use when the current mode\'s work is complete and the next mode should take over',
       '(e.g. call with mode:"build" once a plan is finished and ready to execute).',
       'The mode switches immediately on approval (same path as /mode).',
+      'The plan/context stays in your prior assistant response — do NOT duplicate it in tool parameters.',
     ].join(" "),
     promptSnippet: "Request a mode change (e.g. plan→build once the plan is complete)",
     promptGuidelines: [
-      'Use request_mode_change when the current mode\'s work is complete and the next mode should take over. For example, in plan mode once the plan is written and ready, call request_mode_change with mode:"build" and a brief reason to offer the user a seamless switch to execution. In build mode, if you hit unexpected complexity that needs planning, call it with mode:"plan". The user must confirm before the switch happens.',
+      'Use request_mode_change when the current mode\'s work is complete and the next mode should take over. For example, in plan mode once the plan is written and ready, present the full plan in your response then call request_mode_change with mode:"build" to offer the user a seamless switch to execution. In build mode, if you hit unexpected complexity that needs planning, call it with mode:"plan". The user must confirm before the switch happens. The full plan or context lives in your prior assistant response and carries through the conversation — do NOT duplicate it in tool parameters (it would just clutter the chat).',
     ],
     parameters: Type.Object({
       mode: Type.String({
         description:
           'Target mode id: "default" | "plan" | "build" | "orchestrator" (or any custom mode id). Validated at runtime against the available modes.',
       }),
-      reason: Type.Optional(
-        Type.String({
-          description: "The plan or a readable summary, shown in the confirmation popup so the user can review it while deciding. Also delivered to the next mode as its kickoff instruction (the mode switches and a fresh turn continues under the new mode's prompt).",
-        }),
-      ),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -785,10 +846,16 @@ export default function modesExtension(pi: ExtensionAPI): void {
       }
       const target = availableModes[targetIndex];
       const current = availableModes[currentModeIndex];
-      const reason = params.reason ? String(params.reason).trim() : "";
-      const body = `${current.name} → ${target.name}` + (reason ? `\n\n${reason}` : "");
-      const ok = await ctx.ui.confirm("Request mode change?", body);
-      if (!ok) {
+      // Single-line popup: use ctx.ui.select directly (not ctx.ui.confirm).
+      // ctx.ui.confirm is hardcoded to join `title + "\n" + message`, so even
+      // with an empty message it renders a trailing blank line (the "\n"
+      // splits into a second, empty line). ctx.ui.select passes the title
+      // straight to the selector with no "\n" join, so the title renders as
+      // exactly one line. Same Yes/No UI, no blank line. (The extension already
+      // uses ctx.ui.select this way for the /mode command.) select returns
+      // undefined on cancel; treat anything other than "Yes" as a decline.
+      const choice = await ctx.ui.select(`${current.name} → ${target.name}?`, ["Yes", "No"]);
+      if (choice !== "Yes") {
         return {
           content: [
             { type: "text", text: `Declined — staying in ${current.name} mode.` },
@@ -812,8 +879,10 @@ export default function modesExtension(pi: ExtensionAPI): void {
       // output under this turn's (now-stale) system prompt. The queued
       // sendUserMessage fires a fresh turn → before_provider_request injects
       // the NEW mode's system prompt, so the LLM always operates under the
-      // current mode. The reason (plan summary) doubles as the kickoff.
-      const kickoff = reason || `Proceed in ${target.name} mode.`;
+      // current mode. The kickoff is intentionally generic — the full plan or
+      // context lives in the prior assistant turn (carried through the
+      // conversation), which the new mode's prompt tells it to read.
+      const kickoff = `Proceed in ${target.name} mode.`;
       pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
       return {
         content: [
@@ -987,6 +1056,11 @@ export default function modesExtension(pi: ExtensionAPI): void {
 
     // Seed user modes dir from shipped modes (missing only).
     copyShippedModes();
+
+    // One-time migration: move activeMode out of settings.json (synced) into
+    // the local-only .modes-state.json so mode switches stop causing sync
+    // conflicts. Idempotent — no-op once migrated.
+    migrateActiveModeFromSettings();
 
     // (Re)load available modes.
     availableModes = loadAvailableModes(ctx.cwd);
