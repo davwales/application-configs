@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.80.3",
+  "lastChangelogVersion": "0.80.7",
   "packages": [
     "npm:pi-ollama-cloud",
     "npm:@ifi/oh-pi-themes",

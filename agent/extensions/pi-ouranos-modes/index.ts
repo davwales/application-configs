@@ -29,7 +29,15 @@
  *     machines, since model choices should be consistent); restores them on
  *     every mode switch (including session start). The --model / --thinking
  *     CLI flags are overridden by the active mode's saved pref at startup
- *     (use /model after startup, which updates the pref).
+ *     (use /model after startup, which updates the pref). The restore is
+ *     NON-POLLUTING: pi.setModel / pi.setThinkingLevel also persist the new
+ *     value to the global defaultProvider / defaultModel / defaultThinkingLevel
+ *     keys in settings.json, which would create committed churn on every
+ *     mode switch — restoreModelAndThinking snapshots those three global
+ *     defaults first and writes them back after the restore (waiting for pi
+ *     core's settingsManager writeQueue to flush), so the global defaults only
+ *     ever change on a user-driven /model or /thinking action, never on a
+ *     mode switch. modePrefs stays the source of truth for per-mode restore.
  *
  * Replaces the npm pi-modes extension.
  */
@@ -579,6 +587,25 @@ export default function modesExtension(pi: ExtensionAPI): void {
     const pref = readModePref(modeId);
     if (!pref) return; // first time in this mode — leave current model+thinking alone
 
+    // Snapshot the GLOBAL defaults (defaultProvider / defaultModel /
+    // defaultThinkingLevel) BEFORE calling pi.setModel / pi.setThinkingLevel.
+    // Those pi-core methods persist the new value to these global keys in
+    // settings.json — not just the in-session state — which would create
+    // spurious committed changes whenever the per-mode pref differs from the
+    // global default (exactly the churn the activeMode→.modes-state.json
+    // migration fixed for `activeMode`). The per-mode pref under `modePrefs` is
+    // the source of truth for what a mode restores; the global defaults reflect
+    // the user's last manual /model or /thinking choice and must NOT be
+    // touched by a mode switch. We restore the snapshot in the finally below.
+    const before = readSettings();
+    const snapshot = before
+      ? {
+          defaultProvider: before.defaultProvider,
+          defaultModel: before.defaultModel,
+          defaultThinkingLevel: before.defaultThinkingLevel,
+        }
+      : null;
+
     isRestoring = true;
     try {
       // 1. Restore model first (setModel internally re-clamps thinking to the
@@ -613,6 +640,40 @@ export default function modesExtension(pi: ExtensionAPI): void {
         }
       }
     } finally {
+      // Restore the global defaults that pi.setModel / pi.setThinkingLevel just
+      // polluted. pi core's settingsManager.save() does NOT write to disk
+      // synchronously — it queues via chained Promise.then on a writeQueue, so
+      // the polluted values are NOT on disk yet when setThinkingLevel returns.
+      // We must wait for the microtask queue to drain completely (including
+      // chained .then continuations) before reading settings.json back;
+      // setImmediate runs only after the microtask queue is empty. (A single
+      // `await Promise.resolve()` is insufficient — chained .then resolutions
+      // schedule new microtasks that wouldn't have run yet.) isRestoring stays
+      // true through this so any queued thinking_level_select / model_select
+      // emit continuations (dispatched by setThinkingLevel / setModel) still
+      // see isRestoring=true and skip writing the pref — though in practice
+      // the modes handlers already ran synchronously inside the pi-core call
+      // and returned early, this is defensive.
+      if (snapshot) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const after = readSettings();
+        if (after) {
+          let changed = false;
+          if (after.defaultProvider !== snapshot.defaultProvider) {
+            after.defaultProvider = snapshot.defaultProvider;
+            changed = true;
+          }
+          if (after.defaultModel !== snapshot.defaultModel) {
+            after.defaultModel = snapshot.defaultModel;
+            changed = true;
+          }
+          if (after.defaultThinkingLevel !== snapshot.defaultThinkingLevel) {
+            after.defaultThinkingLevel = snapshot.defaultThinkingLevel;
+            changed = true;
+          }
+          if (changed) writeSettings(after);
+        }
+      }
       isRestoring = false;
     }
   }
