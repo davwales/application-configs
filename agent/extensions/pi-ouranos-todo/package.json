@@ -1,0 +1,33 @@
+{
+  "name": "pi-ouranos-todo",
+  "version": "0.2.0",
+  "description": "Opencode-style todo tool for the Pi Coding Agent. Single call replaces the full list and prints it under a simple 'Todos' header. No widget, no dependencies, no close validation.",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "license": "MIT",
+  "author": "Ben",
+  "files": [
+    "index.ts",
+    "README.md",
+    "tool/types.ts",
+    "tool/response-envelope.ts",
+    "state/state.ts",
+    "state/store.ts",
+    "state/state-reducer.ts",
+    "state/replay.ts",
+    "view/render.ts"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}
