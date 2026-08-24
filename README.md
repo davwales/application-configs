@@ -31,7 +31,7 @@ Part of [application-configs](../../tree/main).
 ```bash
 # Clone this branch directly into ~/.pi
 git clone --branch pi-coder-agent --single-branch \
-  ssh://git@codeberg.org/dwales/application-configs.git \
+  git@github.com:davwales/application-configs.git \
   ~/.pi
 ```
 
