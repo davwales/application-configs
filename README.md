@@ -30,7 +30,7 @@ Part of [application-configs](../../tree/main).
 ```bash
 # Clone this branch directly into ~/.config/tmux
 git clone --branch tmux --single-branch \
-  ssh://git@codeberg.org/dwales/application-configs.git \
+  git@github.com:davwales/application-configs.git \
   ~/.config/tmux
 
 # Install the catppuccin theme plugin
