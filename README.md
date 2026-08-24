@@ -16,7 +16,7 @@ A collection of application configurations, organized by branch.
 Clone this repository, then checkout the branch for the application you want:
 
 ```bash
-git clone ssh://git@codeberg.org/dwales/application-configs.git
+git clone git@github.com:davwales/application-configs.git
 cd application-configs
 git checkout nvim            # for Neovim config
 git checkout pi-coder-agent  # for Pi Coder Agent config
@@ -27,7 +27,7 @@ git checkout tmux            # for Tmux config
 Or clone a single branch directly:
 
 ```bash
-git clone --branch nvim --single-branch ssh://git@codeberg.org/dwales/application-configs.git nvim-config
+git clone --branch nvim --single-branch git@github.com:davwales/application-configs.git nvim-config
 ```
 
 ## Structure
