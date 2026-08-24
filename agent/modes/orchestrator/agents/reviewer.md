@@ -2,7 +2,7 @@
 name: reviewer
 description: Code quality reviewer that checks correctness, security, maintainability, and alignment with specs. Handles both post-implementation code review and general code/config/prompt audit tasks. Provides sign-off-ready assessments for the product owner.
 tools: read, grep, find, ls, bash
-model: ollama-cloud/deepseek-v4-pro
+model: ollama-cloud/glm-5.2
 thinking: high
 ---
 

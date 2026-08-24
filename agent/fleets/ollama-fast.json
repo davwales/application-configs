@@ -1,9 +1,9 @@
 {
   "name": "fast",
   "agents": {
-    "scout": { "provider": "ollama-cloud", "model": "ministral-3:8b", "thinking": "low" },
-    "architect": { "provider": "ollama-cloud", "model": "deepseek-v4-flash", "thinking": "high" },
-    "backend-developer": { "provider": "ollama-cloud", "model": "nemotron-3-nano:30b", "thinking": "high" },
-    "worker": { "provider": "ollama-cloud", "model": "nemotron-3-nano:30b", "thinking": "medium" }
+    "scout": { "provider": "ollama-cloud", "model": "deepseek-v4-flash:0731-cloud", "thinking": "low" },
+    "architect": { "provider": "ollama-cloud", "model": "deepseek-v4-flash:0731-cloud", "thinking": "high" },
+    "backend-developer": { "provider": "ollama-cloud", "model": "deepseek-v4-flash:0731-cloud", "thinking": "high" },
+    "worker": { "provider": "ollama-cloud", "model": "deepseek-v4-flash:0731-cloud", "thinking": "medium" }
   }
 }

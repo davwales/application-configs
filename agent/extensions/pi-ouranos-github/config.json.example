@@ -1,0 +1,14 @@
+{
+  "auth": {
+    "token": "ghp_your_personal_access_token"
+  },
+  "cache": {
+    "ttl": { "issue": 3600, "repo": 86400, "release": 86400, "commit": 0, "file": 0 },
+    "maxBytes": 10485760
+  },
+  "pagination": { "defaultLimit": 30, "maxLimit": 100 },
+  "truncation": {
+    "maxBodyChars": 50000,
+    "maxPatchChars": 10000
+  }
+}

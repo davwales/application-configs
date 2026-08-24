@@ -2,7 +2,7 @@
 name: worker
 description: Catchall agent for tasks that don't fit the frontend/backend split — documentation, config files, prompt edits, settings, scripts, glue code, and general file modifications. Does whatever needs doing.
 tools: read, grep, find, ls, edit, write, bash
-model: ollama-cloud/deepseek-v4-flash
+model: ollama-cloud/deepseek-v4-flash:0731-cloud
 thinking: medium
 ---
 

@@ -367,6 +367,55 @@ export function readActiveModeFromSettings(agentDir: string): string | null {
 }
 
 /**
+ * Read the active mode id from the per-session session log.
+ *
+ * pi-ouranos-modes writes the active mode to the session log on every switch
+ * via `pi.appendEntry("modes-state", { mode })`. This is PER-SESSION state:
+ * each pi process has its own session log, so two concurrent pi sessions on
+ * different projects each see their own mode. The shared
+ * `~/.pi/agent/.modes-state.json` (read by readActiveModeFromSettings) is
+ * PER-MACHINE and is clobbered by whichever session switched mode last —
+ * making it unsafe for the subagent tool's mode resolution when more than
+ * one pi process is running (a parent + a spawned subagent, or two parallel
+ * project sessions).
+ *
+ * Scans the session entries in reverse for the latest custom entry whose
+ * customType is "modes-state" (the PERSIST_KEY used by pi-ouranos-modes) and
+ * returns its `data.mode` string. Mirrors the reverse-scan that
+ * pi-ouranos-modes' own session_start uses to restore the persisted mode.
+ *
+ * Returns the mode id string, or null if no entry is found / the session
+ * manager is unavailable / the session has no mode entry yet (e.g. a fresh
+ * session that hasn't switched, or a subagent child running with
+ * --no-session which has no session log at all).
+ */
+export function readActiveModeFromSession(
+	sessionManager: { getEntries(): unknown[] } | undefined,
+): string | null {
+	if (!sessionManager) return null;
+	let entries: unknown[];
+	try {
+		entries = sessionManager.getEntries();
+	} catch (e) {
+		console.error(`[subagents] Failed to read session entries for active mode: ${e instanceof Error ? e.message : String(e)}`);
+		return null;
+	}
+	if (!Array.isArray(entries)) return null;
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i] as
+			| { type?: string; customType?: string; data?: { mode?: unknown } }
+			| undefined;
+		if (!entry || entry.type !== "custom") continue;
+		if (entry.customType !== "modes-state") continue;
+		const mode = entry.data?.mode;
+		if (typeof mode === "string" && mode.trim() !== "") {
+			return mode.trim();
+		}
+	}
+	return null;
+}
+
+/**
  * Load agent definitions for a given mode from the user and project layers.
  * (Package layer is intentionally omitted: pi-ouranos-modes ships its mode
  * directories and copies them into ~/.pi/agent/modes/ on first run, so the

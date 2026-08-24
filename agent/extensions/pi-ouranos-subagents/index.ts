@@ -21,7 +21,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, getAgentDir, getMarkdownTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type AgentConfig, type AgentScope, applyAgentOverrides, applyFleet, discoverAgents, findProjectModeAgentsDir, formatAvailableAgents, getFleetAgentNames, loadActiveFleet, loadModeAgents, readActiveModeFromSettings, resolveInheritance } from "./agents.js";
+import { type AgentConfig, type AgentScope, applyAgentOverrides, applyFleet, discoverAgents, findProjectModeAgentsDir, formatAvailableAgents, getFleetAgentNames, loadActiveFleet, loadModeAgents, readActiveModeFromSession, readActiveModeFromSettings, resolveInheritance } from "./agents.js";
 
 
 
@@ -727,15 +727,23 @@ export default function (pi: ExtensionAPI) {
 			const agentDir = getAgentDir();
 
 			// Resolve the agent set. When a mode is active (set by pi-ouranos-modes
-			// via the `activeMode` key in .modes-state.json — a local-only,
-			// gitignored file; see readActiveModeFromSettings for the settings.json
-			// fallback), agents come from the mode's agent directory and each
-			// agent's `model` frontmatter is the source of model assignments. NO
-			// fleet is applied in the mode path — the fleet override layer is only
-			// for the no-mode fallback below. (Applying the user's `activeFleet`
-			// here would filter out planner/builder, which are not in any fleet,
-			// breaking Plan/Build modes.)
-			const activeMode = readActiveModeFromSettings(agentDir);
+			// via a per-session session-log entry — `modes-state` custom entry
+			// written by appendEntry on every mode switch; see
+			// readActiveModeFromSession), agents come from the mode's agent
+			// directory and each agent's `model` frontmatter is the source of
+			// model assignments. NO fleet is applied in the mode path — the fleet
+			// override layer is only for the no-mode fallback below. (Applying the
+			// user's `activeFleet` here would filter out planner/builder, which are
+			// not in any fleet, breaking Plan/Build modes.)
+			//
+			// The session log is PER-SESSION, so concurrent pi processes (two
+			// parallel project sessions, or a parent + a spawned subagent) each
+			// resolve their own mode without clobbering each other. The
+			// per-machine .modes-state.json (readActiveModeFromSettings) is only a
+			// backward-compat fallback for sessions that predate pi-ouranos-modes
+			// writing session-log entries (or when pi-ouranos-modes isn't
+			// installed).
+			const activeMode = readActiveModeFromSession(ctx.sessionManager) ?? readActiveModeFromSettings(agentDir);
 			let agents: AgentConfig[];
 			let projectAgentsDir: string | null;
 			if (activeMode) {
@@ -878,14 +886,22 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Inject orchestrator identity into the main agent (not subagents)
-	pi.on("before_agent_start", async (_event, _ctx) => {
+	// NOTE: this hook must APPEND to event.systemPrompt, never REPLACE it.
+	// Returning { systemPrompt: ... } from before_agent_start replaces the
+	// ENTIRE base system prompt (tools, # Project Context from AGENTS.md,
+	// skills, date/cwd). Historically we returned only our own block, which
+	// silently dropped all of that from every session.
+	pi.on("before_agent_start", async (event, _ctx) => {
 		// Skip injection in subagent contexts — they have their own identity
 		if (process.env.PI_SUBAGENT === "1") {
 			return;
 		}
 
 		const agentDir = getAgentDir();
-		const activeMode = readActiveModeFromSettings(agentDir);
+		// Per-session mode resolution (see the execute() handler for the full
+		// rationale): read the active mode from this session's log first, fall
+		// back to the per-machine .modes-state.json only for backward compat.
+		const activeMode = readActiveModeFromSession(_ctx.sessionManager) ?? readActiveModeFromSettings(agentDir);
 
 		if (activeMode) {
 			// ── Mode-aware branch ───────────────────────────────────────────────
@@ -930,24 +946,25 @@ export default function (pi: ExtensionAPI) {
 			// injecting the "delegate everything" philosophy here would directly
 			// contradict the lighter-delegation intent of those modes.
 			if (activeMode === "orchestrator") {
-				// Orchestrator mode: keep CURRENT behavior — full orchestrator
-				// prompt + agent availability context.
+				// Orchestrator mode: full orchestrator prompt + agent availability
+				// context, appended to the base system prompt.
 				const prompt = loadOrchestratorPrompt();
 				if (!prompt) return;
-				return { systemPrompt: `\n\n${prompt}${agentContext}` };
+				return { systemPrompt: `${event.systemPrompt}\n\n${prompt}${agentContext}` };
 			}
 			if (resolved.length > 0) {
 				// Non-orchestrator has-subagent mode: agent availability context
-				// ONLY — no orchestrator delegation philosophy prompt.
-				return { systemPrompt: agentContext };
+				// ONLY — no orchestrator delegation philosophy prompt. Appended
+				// to the base system prompt so tools/# Project Context/skills are
+				// preserved.
+				return { systemPrompt: `${event.systemPrompt}${agentContext}` };
 			}
-			// Zero-agent mode: UNCHANGED. The orchestrator prompt is injected
-			// here, but pi-ouranos-modes' before_provider_request REPLACEs the
-			// system prompt entirely with the mode's standalone policy, so the
-			// net effect is that only the mode policy reaches the model.
-			const prompt = loadOrchestratorPrompt();
-			if (!prompt) return;
-			return { systemPrompt: `\n\n${prompt}${agentContext}` };
+			// Zero-agent mode: append the agent availability context to the base
+			// system prompt. We deliberately do NOT inject the orchestrator
+			// "delegate everything" prompt here — it was previously discarded by
+			// pi-ouranos-modes' before_provider_request REPLACE, but that hook
+			// now APPENDs, so injecting it would leak into no-subagent modes.
+			return { systemPrompt: `${event.systemPrompt}${agentContext}` };
 		}
 
 		// ── No-mode fallback branch (fleet-based, backward compatible) ────────
@@ -982,7 +999,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		return {
-			systemPrompt: `\n\n${prompt}${agentContext}`,
+			systemPrompt: `${event.systemPrompt}\n\n${prompt}${agentContext}`,
 		};
 	});
 }

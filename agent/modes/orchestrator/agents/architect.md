@@ -2,7 +2,7 @@
 name: architect
 description: Designs feature architecture. Reads and plans but never implements. Produces a unified design with clear frontend/backend boundaries for the orchestrator to distribute.
 tools: read, grep, find, ls
-model: ollama-cloud/deepseek-v4-pro
+model: ollama-cloud/glm-5.2
 thinking: high
 ---
 

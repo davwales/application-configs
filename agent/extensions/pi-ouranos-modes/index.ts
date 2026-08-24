@@ -972,12 +972,20 @@ export default function modesExtension(pi: ExtensionAPI): void {
   });
 
   // ── before_provider_request: inject the active mode's delegation policy ─────
-  // REPLACE the system prompt content for no-subagent modes (default —
-  // suppresses the orchestrator "delegate everything" prompt injected by
-  // pi-ouranos-subagents' before_agent_start). APPEND for has-subagent modes
-  // (plan/build/orchestrator — the orchestrator prompt stays, the mode policy
-  // is added). Handles Anthropic-style (payload.system string|array) and
-  // OpenAI-style (payload.messages with a system role) payload shapes.
+  // ALWAYS APPEND the mode policy to whatever system content is already present
+  // (the base system prompt — tools, # Project Context from AGENTS.md, skills,
+  // date/cwd — plus pi-ouranos-subagents' agent-availability context).
+  //
+  // Historical note: this used to REPLACE the system content for no-subagent
+  // modes (default) to suppress the orchestrator "delegate everything" prompt
+  // injected by pi-ouranos-subagents' before_agent_start. But REPLACE also
+  // dropped the ENTIRE base system prompt (tools, AGENTS.md, skills, date/cwd)
+  // for those modes. The orchestrator prompt is no longer injected in
+  // no-subagent modes at all (pi-ouranos-subagents handles that), so APPEND is
+  // safe and correct for every mode.
+  //
+  // Handles Anthropic-style (payload.system string|array) and OpenAI-style
+  // (payload.messages with a system role) payload shapes.
 
   // Deep-ish clone of the payload so this handler can return a NEW payload
   // (per ExtensionAPI: returning a non-undefined value from before_provider_request
@@ -1029,13 +1037,9 @@ export default function modesExtension(pi: ExtensionAPI): void {
   pi.on("before_provider_request", (event, _ctx) => {
     const mode = availableModes[currentModeIndex];
     if (!mode || !mode.prompt) return;
-    if (mode.hasAgents) {
-      // Append (orchestrator prompt from subagents ext is preserved).
-      return applySystemPayload(event.payload, `\n\n[MODE: ${mode.name.toUpperCase()}]\n${mode.prompt}`, false);
-    } else {
-      // Replace — standalone primary-agent prompt, no delegation references.
-      return applySystemPayload(event.payload, mode.prompt, true);
-    }
+    // Always APPEND — never REPLACE. See comment above for why REPLACE was
+    // dropped: it destroyed the base system prompt for no-subagent modes.
+    return applySystemPayload(event.payload, `\n\n[MODE: ${mode.name.toUpperCase()}]\n${mode.prompt}`, false);
   });
 
   // ── model_select / thinking_level_select: persist per-mode model + thinking ─
@@ -1102,6 +1106,20 @@ export default function modesExtension(pi: ExtensionAPI): void {
   // ── Bootstrap ─────────────────────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
+    // Subagents run isolated (PI_SUBAGENT=1, --no-session, --mode json -p).
+    // They are spawned by pi-ouranos-subagents and get their identity from
+    // --append-system-prompt, their tool set from --tools — they have no use
+    // for baselineTools / availableModes / currentModeIndex and never call
+    // /mode, the alt+M shortcuts, or request_mode_change. Letting
+    // session_start run here would default the subagent to "orchestrator"
+    // (no --mode flag — consumed by pi core's CLI parser; no session entries
+    // — --no-session) and call writeActiveMode("orchestrator"), OVERWRITING the
+    // parent's ~/.pi/agent/.modes-state.json. With the per-session mode
+    // resolution in pi-ouranos-subagents (readActiveModeFromSession) the
+    // overwrite is harmless, but skipping this work entirely is cleaner and
+    // avoids a confusing .modes-state.json flip during subagent runs.
+    if (process.env.PI_SUBAGENT === "1") return;
+
     // Capture the FULL set of registered tools as the baseline (not the
     // currently-active set). Using getActiveTools() here would capture whatever
     // is active at session_start — after a reload that started in a restrictive

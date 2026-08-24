@@ -2,7 +2,7 @@
 name: researcher
 description: Answers technical unknowns by researching external dependencies, APIs, docs, and best practices. Provides concise, cited research briefs for the orchestrator.
 tools: ollama_web_search, ollama_web_fetch, context7_resolve_library_id, context7_get_library_docs, read, grep
-model: ollama-cloud/deepseek-v4-flash
+model: ollama-cloud/deepseek-v4-flash:0731-cloud
 thinking: low
 ---
 

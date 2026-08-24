@@ -2,7 +2,7 @@
 name: product-owner
 description: Refines requirements for new features, defines acceptance criteria, and signs off on completed functionality. Does not interact with the user directly.
 tools: read, grep, find, ls
-model: ollama-cloud/deepseek-v4-flash
+model: ollama-cloud/deepseek-v4-flash:0731-cloud
 thinking: high
 ---
 
