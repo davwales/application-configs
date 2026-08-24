@@ -1,6 +1,8 @@
 Continue.continue: '{"hasBeenInstalled":true}'
-ms-dotnettools.vscode-dotnet-runtime: '{"installed":[],"dotnet.returnedInstallDirectories":{"session-767463b98c":["/usr/lib64/dotnet/dotnet"],"session-49d4c4ad81":["/usr/lib64/dotnet/dotnet"],"session-28f95e2446":["/usr/lib64/dotnet/dotnet"],"session-66cef6d48f":["/usr/lib64/dotnet/dotnet"],"session-86a8e518e5":["/usr/lib64/dotnet/dotnet"],"session-a8add3caf6":["/usr/lib64/dotnet/dotnet"]}}'
-workbench.activity.pinnedViewlets2: '[{"id":"workbench.view.explorer","pinned":true,"visible":false,"order":0},{"id":"workbench.view.search","pinned":true,"visible":false,"order":1},{"id":"workbench.view.scm","pinned":true,"visible":false,"order":2},{"id":"workbench.view.debug","pinned":true,"visible":false,"order":3},{"id":"workbench.view.remote","pinned":true,"visible":false,"order":4},{"id":"workbench.view.extensions","pinned":true,"visible":false,"order":4},{"id":"workbench.view.extension.test","pinned":true,"visible":false,"order":6},{"id":"workbench.view.extension.references-view","pinned":true,"visible":false,"order":7},{"id":"workbench.view.extension.continue","pinned":true,"visible":false,"order":8},{"id":"workbench.view.extension.python","pinned":true,"visible":false,"order":9},{"id":"workbench.view.extension.rustSyntaxTreeContainer","pinned":true,"visible":false,"order":10}]'
+ms-dotnettools.vscode-dotnet-runtime: '{"installed":[],"dotnet.returnedInstallDirectories":{"session-767463b98c":["/usr/lib64/dotnet/dotnet"],"session-49d4c4ad81":["/usr/lib64/dotnet/dotnet"],"session-28f95e2446":["/usr/lib64/dotnet/dotnet"],"session-66cef6d48f":["/usr/lib64/dotnet/dotnet"],"session-86a8e518e5":["/usr/lib64/dotnet/dotnet"],"session-a8add3caf6":["/usr/lib64/dotnet/dotnet"],"session-06639fea9c":["/usr/lib64/dotnet/dotnet"],"session-1479ec4519":["/usr/lib64/dotnet/dotnet"],"session-0648cbc21f":["/usr/lib64/dotnet/dotnet"],"session-ca6c2dd348":["/usr/lib64/dotnet/dotnet"],"session-c3f4e3ad51":["/usr/lib64/dotnet/dotnet"],"session-729f84c02c":["/usr/lib64/dotnet/dotnet"],"session-2f917f580d":["/usr/lib64/dotnet/dotnet"],"session-ef1de1fd26":["/usr/lib64/dotnet/dotnet"],"session-67588c4e42":["/usr/lib64/dotnet/dotnet"],"session-e88fef0f0b":["/usr/lib64/dotnet/dotnet"],"session-6677e64f1a":["/usr/lib64/dotnet/dotnet"],"session-2a50fdad92":["/usr/lib64/dotnet/dotnet"],"session-dc7f73a8a9":["/usr/lib64/dotnet/dotnet"],"session-a2ddb350b9":["/usr/lib64/dotnet/dotnet"],"session-491249b5c4":["/usr/lib64/dotnet/dotnet"],"session-b3e10263cd":["/usr/lib64/dotnet/dotnet"],"session-cb759aa652":["/usr/lib64/dotnet/dotnet"]}}'
+ms-python.debugpy: '{"PYTHON_GLOBAL_STORAGE_KEYS":[{"key":"PYTHON_EXTENSION_GLOBAL_STORAGE_KEYS","defaultValue":[]}]}'
+ms-python.vscode-python-envs: '{"globalSettingsMigration.systemEnvManagerRemoved":true}'
+workbench.activity.pinnedViewlets2: '[{"id":"workbench.view.explorer","pinned":true,"visible":false,"order":0},{"id":"workbench.view.search","pinned":true,"visible":false,"order":1},{"id":"workbench.view.scm","pinned":true,"visible":false,"order":2},{"id":"workbench.view.debug","pinned":true,"visible":false,"order":3},{"id":"workbench.view.remote","pinned":true,"visible":false,"order":4},{"id":"workbench.view.extensions","pinned":true,"visible":false,"order":4},{"id":"workbench.view.extension.test","pinned":true,"visible":false,"order":6},{"id":"workbench.view.extension.references-view","pinned":true,"visible":false,"order":7},{"id":"workbench.view.extension.continue","pinned":true,"visible":false,"order":8},{"id":"workbench.view.extension.python","pinned":true,"visible":false,"order":9},{"id":"workbench.view.voiceTranscriptsContainer","pinned":true,"visible":false,"order":10},{"id":"workbench.view.extension.rustSyntaxTreeContainer","pinned":true,"visible":false,"order":10}]'
 workbench.activity.placeholderViewlets: "[{\"id\":\"workbench.view.explorer\",\
   \"themeIcon\":{\"id\":\"explorer-view-icon\"},\"name\":\"Explorer\",\"isBuilt\
   in\":true,\"views\":[{},{},{},{\"when\":\"timelineHasProvider\"},{\"when\":\"\
@@ -100,15 +102,18 @@ workbench.activity.placeholderViewlets: "[{\"id\":\"workbench.view.explorer\",\
   ension.references-view\",\"themeIcon\":{\"id\":\"references\"},\"name\":\"Ref\
   erences\",\"isBuiltin\":false,\"views\":[{\"when\":\"reference-list.isActive\
   \"}]},{\"id\":\"workbench.view.extension.continue\",\"iconUrl\":{\"$mid\":1,\
-  \"path\":\"%%EXTENSION_DATA_PATH%%/continue.continue-1.2.22-linux-x64/media/s\
-  idebar-icon.png\",\"scheme\":\"file\"},\"name\":\"Continue\",\"isBuiltin\":fa\
-  lse,\"views\":[{}]},{\"id\":\"workbench.view.extension.python\",\"iconUrl\":{\
+  \"path\":\"%%EXTENSION_DATA_PATH%%/continue.continue-2.0.0-linux-x64/media/si\
+  debar-icon.png\",\"scheme\":\"file\"},\"name\":\"Continue\",\"isBuiltin\":fal\
+  se,\"views\":[{}]},{\"id\":\"workbench.view.extension.python\",\"iconUrl\":{\
   \"$mid\":1,\"path\":\"%%EXTENSION_DATA_PATH%%/ms-python.vscode-python-envs-1.\
-  30.0-universal/files/logo.svg\",\"scheme\":\"file\"},\"name\":\"Python\",\"is\
+  36.0-universal/files/logo.svg\",\"scheme\":\"file\"},\"name\":\"Python\",\"is\
   Builtin\":false,\"views\":[{\"when\":\"config.python.useEnvironmentsExtension\
   \"},{\"when\":\"config.python.useEnvironmentsExtension\"}]},{\"id\":\"workben\
-  ch.view.extension.rustSyntaxTreeContainer\",\"themeIcon\":{\"id\":\"list-tree\
-  \"},\"name\":\"Rust Syntax
+  ch.view.voiceTranscriptsContainer\",\"themeIcon\":{\"id\":\"voice-transcripts\
+  -view-icon\"},\"name\":\"Voice
+  Transcripts\",\"isBuiltin\":true,\"views\":[{\"when\":\"voiceTranscripts.show\
+  View\"}]},{\"id\":\"workbench.view.extension.rustSyntaxTreeContainer\",\"them\
+  eIcon\":{\"id\":\"list-tree\"},\"name\":\"Rust Syntax
   Tree\",\"isBuiltin\":false,\"views\":[{\"when\":\"config.rust-analyzer.showSy\
   ntaxTree && inRustProject\"}]}]"
 workbench.activityBar.location: default
@@ -116,10 +121,12 @@ workbench.auxiliaryBar.empty: "true"
 workbench.auxiliaryBar.lastNonMaximizedSize: "300"
 workbench.auxiliarybar.pinnedPanels: '[{"id":"workbench.panel.chat","pinned":true,"visible":false,"order":1}]'
 workbench.auxiliarybar.placeholderPanels: '[{"id":"workbench.panel.chat","themeIcon":{"id":"chat-view-icon"},"name":"Chat","isBuiltin":true,"views":[{"when":"chatExtensionInvalid
-  || chatPanelParticipantRegistered || !chatSetupDisabledInWorkspace &&
-  !chatSetupHidden && !config.chat.disableAIFeatures"}]}]'
+  && !chatAccountPolicyGateActive || chatPanelParticipantRegistered &&
+  !chatAccountPolicyGateActive || !chatAccountPolicyGateActive &&
+  !chatSetupDisabledInWorkspace && !chatSetupHidden &&
+  !config.chat.disableAIFeatures"}]}]'
 workbench.auxiliaryBar.size: "300"
-workbench.editor.languageDetectionOpenedLanguages.global: '[["jsonc",true],["yaml",true],["ignore",true],["json",true],["plaintext",true],["dotenv",true],["javascript",true],["markdown",true],["typescriptreact",true],["typescript",true],["xml",true],["csharp",true]]'
+workbench.editor.languageDetectionOpenedLanguages.global: '[["jsonc",true],["ignore",true],["dockercompose",true],["dockerfile",true],["toml",true],["json",true],["python",true],["typescript",true],["typescriptreact",true],["xml",true],["csharp",true],["yaml",true]]'
 workbench.explorer.views.state.hidden: '[{"id":"outline","isHidden":false},{"id":"timeline","isHidden":false},{"id":"workbench.explorer.openEditorsView","isHidden":true},{"id":"workbench.explorer.emptyView","isHidden":false},{"id":"workbench.explorer.fileView","isHidden":false},{"id":"npm","isHidden":true},{"id":"rustDependencies","isHidden":false}]'
 workbench.newDefaultThemeNotification: "true"
 workbench.panel.alignment: center
@@ -137,12 +144,13 @@ workbench.panel.repl.hidden: '[{"id":"workbench.panel.repl.view","isHidden":fals
 workbench.panel.size: "268"
 workbench.panel.testResults.state.hidden: '[{"id":"workbench.panel.testResults.view","isHidden":false}]'
 workbench.scm.views.state.hidden: '[{"id":"workbench.scm.repositories","isHidden":false},{"id":"workbench.scm","isHidden":false},{"id":"workbench.scm.history","isHidden":false}]'
-workbench.sideBar.size: "418"
+workbench.sideBar.size: "300"
 workbench.view.debug.state.hidden: '[{"id":"workbench.debug.welcome","isHidden":false},{"id":"workbench.debug.variablesView","isHidden":false},{"id":"workbench.debug.watchExpressionsView","isHidden":false},{"id":"workbench.debug.callStackView","isHidden":false},{"id":"workbench.debug.loadedScriptsView","isHidden":false},{"id":"workbench.debug.breakPointsView","isHidden":false},{"id":"jsBrowserBreakpoints","isHidden":false},{"id":"jsExcludedCallers","isHidden":false},{"id":"jsDebugNetworkTree","isHidden":false},{"id":"extension.firefox.loadedScripts","isHidden":false},{"id":"extension.firefox.eventBreakpoints","isHidden":false},{"id":"dotrush.modulesView","isHidden":false}]'
 workbench.view.extension.continue.state.hidden: '[{"id":"continue.continueGUIView","isHidden":false}]'
 workbench.view.extension.references-view.state.hidden: '[{"id":"references-view.tree","isHidden":false}]'
 workbench.view.extension.test.state.hidden: '[{"id":"workbench.view.testing","isHidden":false},{"id":"workbench.view.testCoverage","isHidden":false}]'
 workbench.view.extensions.state.hidden: '[{"id":"workbench.views.extensions.marketplaceAccess","isHidden":false},{"id":"workbench.views.extensions.installed","isHidden":false},{"id":"workbench.views.extensions.searchOutdated","isHidden":false},{"id":"workbench.views.extensions.workspaceRecommendations","isHidden":false},{"id":"workbench.views.extensions.popular","isHidden":false},{"id":"workbench.views.extensions.searchRecentlyUpdated","isHidden":false},{"id":"workbench.views.extensions.otherRecommendations","isHidden":false},{"id":"extensions.recommendedList","isHidden":false},{"id":"workbench.views.extensions.enabled","isHidden":true},{"id":"workbench.views.mcp.installed","isHidden":false},{"id":"workbench.views.mcp.default.marketplace","isHidden":false},{"id":"workbench.views.mcp.default.welcomeView","isHidden":false},{"id":"workbench.views.extensions.disabled","isHidden":true},{"id":"workbench.views.agentPlugins.installed","isHidden":false},{"id":"workbench.views.agentPlugins.default.marketplace","isHidden":true},{"id":"workbench.views.extensions.marketplace","isHidden":false},{"id":"workbench.views.extensions.searchInstalled","isHidden":false},{"id":"workbench.views.extensions.searchEnabled","isHidden":false},{"id":"workbench.views.extensions.searchDisabled","isHidden":false},{"id":"workbench.views.extensions.searchBuiltin","isHidden":false},{"id":"workbench.views.extensions.searchWorkspaceUnsupported","isHidden":false},{"id":"workbench.views.extensions.builtinFeatureExtensions","isHidden":false},{"id":"workbench.views.extensions.builtinThemeExtensions","isHidden":false},{"id":"workbench.views.extensions.builtinProgrammingLanguageExtensions","isHidden":false},{"id":"workbench.views.extensions.untrustedUnsupportedExtensions","isHidden":false},{"id":"workbench.views.extensions.untrustedPartiallySupportedExtensions","isHidden":false},{"id":"workbench.views.extensions.virtualUnsupportedExtensions","isHidden":false},{"id":"workbench.views.extensions.virtualPartiallySupportedExtensions","isHidden":false},{"id":"workbench.views.extensions.deprecatedExtensions","isHidden":false},{"id":"workbench.views.extensions.restartRequired","isHidden":false},{"id":"workbench.views.agentPlugins.marketplace","isHidden":false},{"id":"workbench.views.mcp.marketplace","isHidden":false},{"id":"workbench.views.mcp.welcomeView","isHidden":false}]'
 workbench.view.search.state.hidden: '[{"id":"workbench.view.search","isHidden":false}]'
-workbench.views.extensions.installed.size: "23"
+workbench.views.extensions.installed.size: "24"
+workbench.welcomePage.walkthroughMetadata: '[["ms-python.python#pythonWelcome",{"firstSeen":1779927261181,"stepIDs":["python.createPythonFolder","python.createPythonFile","python.installPythonWin8","python.installPythonMac","python.installPythonLinux","python.createEnvironment","python.runAndDebug","python.learnMoreWithDS"],"manaullyOpened":false}],["ms-python.python#pythonDataScienceWelcome",{"firstSeen":1779927261181,"stepIDs":["python.installJupyterExt","python.createNewNotebook","python.openInteractiveWindow","python.dataScienceLearnMore"],"manaullyOpened":false}],["rust-lang.rust-analyzer#landing",{"firstSeen":1779927261181,"stepIDs":["setup","docs","faq","changelog"],"manaullyOpened":false}]]'
 zokugun.cron-tasks: '{"version":"0.2.1"}'
