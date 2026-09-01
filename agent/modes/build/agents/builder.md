@@ -1,7 +1,7 @@
 ---
 name: builder
 description: General-purpose implementation worker for parallel sub-tasks
-tools: read, grep, find, ls, bash, write, edit
+tools: read, grep, find, ls, bash, write, edit, mcp, mcpScript, mcp__godot
 model: inherit
 thinking: inherit
 ---

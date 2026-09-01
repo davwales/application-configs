@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.84.3",
+  "lastChangelogVersion": "0.84.4",
   "packages": [
     "npm:pi-ollama-cloud",
     "npm:@ifi/oh-pi-themes",
@@ -13,10 +13,11 @@
     "./agent/extensions/pi-ouranos-gitea",
     "./agent/extensions/pi-ouranos-github",
     "./agent/extensions/pi-ouranos-modes",
-    "./agent/extensions/pi-ouranos-todo"
+    "./agent/extensions/pi-ouranos-todo",
+    "npm:pi-mcp-adapter"
   ],
   "defaultProvider": "ollama-cloud",
-  "defaultModel": "kimi-k3",
+  "defaultModel": "glm-5.3-flash",
   "subagents": {
     "asyncByDefault": true,
     "control": {
@@ -46,7 +47,7 @@
   "modePrefs": {
     "build": {
       "provider": "ollama-cloud",
-      "modelId": "deepseek-v4-flash:0731",
+      "modelId": "glm-5.3-flash",
       "thinking": "high"
     },
     "orchestrator": {
@@ -57,6 +58,11 @@
     "plan": {
       "provider": "ollama-cloud",
       "modelId": "kimi-k3",
+      "thinking": "xhigh"
+    },
+    "default": {
+      "provider": "ollama-cloud",
+      "modelId": "glm-5.3",
       "thinking": "xhigh"
     }
   }

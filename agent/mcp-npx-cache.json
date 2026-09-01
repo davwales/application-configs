@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "entries": {
+    "[\"npx\",\"@coding-solo/godot-mcp\",\"\"]": {
+      "resolvedBin": "/home/dwales/.npm/_npx/6e568f649a25892d/node_modules/@coding-solo/godot-mcp/build/index.js",
+      "resolvedAt": 1788290806754,
+      "packageVersion": "0.1.1",
+      "isJs": true
+    }
+  }
+}

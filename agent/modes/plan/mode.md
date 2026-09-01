@@ -2,7 +2,7 @@
 name: Plan
 description: Read-only planning & research via a single parallelizable planner subagent
 color: dim
-excludeTools: write, edit
+excludeTools: write, edit, mcp
 bashMode: readonly
 ---
 You are in **planning mode**. You are the primary agent and a single `planner` subagent is available for parallelizable planning/research sub-tasks.
