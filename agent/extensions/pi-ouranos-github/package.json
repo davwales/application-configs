@@ -1,6 +1,6 @@
 {
   "name": "pi-ouranos-github",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Read-only GitHub tools for the Pi Coding Agent. Optional token auth (GITHUB_TOKEN/GH_TOKEN), auto-detects repo from git remote, caches across sessions.",
   "type": "module",
   "keywords": [

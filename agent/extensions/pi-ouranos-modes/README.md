@@ -11,11 +11,12 @@ Mode-aware agent orchestration for the [Pi coding agent](https://github.com/eare
 | `build` | `builder` (general-purpose, read+write) | Implementation with parallelizable sub-tasks. |
 | `orchestrator` | all 9 specialists | Full delegation — today's default behavior. |
 
-`planner` and `builder` are **general-purpose workers** used for parallelization and context isolation, not scoped specialists. The primary spawns many of them in parallel via `subagent({ tasks: [...] })` so each gets an isolated context window.
+`planner` and `builder` are **general-purpose workers** used for parallelization and context isolation, not scoped specialists. The primary spawns many of them in parallel by issuing multiple separate `subagent` tool calls in the same message, so each gets an isolated context window.
 
 ## How it works
 
-- The extension owns the `activeMode` key in `~/.pi/agent/.modes-state.json` — a **local-only, gitignored** file (the active mode is per-session/per-machine state and must NOT sync across machines, otherwise every mode switch causes a merge conflict in the synced `settings.json`). `pi-ouranos-subagents` reads it in its subagent tool `execute()` and `before_agent_start` to decide which agent definitions to load. On first run after upgrade, any pre-existing `activeMode` in `~/.pi/agent/settings.json` is migrated out to `.modes-state.json` and stripped from `settings.json` (one-time, idempotent). The extension does NOT touch `activeFleet`.
+- The extension owns the `activeMode` key in `~/.pi/agent/.modes-state.json` — a **local-only, gitignored** file (the active mode is per-session/per-machine state and must NOT sync across machines, otherwise every mode switch causes a merge conflict in the synced `settings.json`). `pi-ouranos-subagents` reads it in its subagent tool `execute()` and `before_agent_start` to decide which agent definitions to load. On first run after upgrade, any pre-existing `activeMode` in `~/.pi/agent/settings.json` is migrated out to `.modes-state.json` and stripped from `settings.json` (one-time, idempotent). At session start the mode is restored with this precedence: the `--mode=<name>` flag, the session log's saved mode (resume/fork), the machine-local `.modes-state.json` value (fresh sessions), and finally the orchestrator default (only when no local state exists, e.g. a true first run). The extension does NOT touch `activeFleet`.
+- **Multiple concurrent sessions:** each session's mode is authoritative per session (in-memory state + that session's own log; resume/fork restore it). `.modes-state.json` is a shared machine-local slot with last-writer-wins semantics: every switch (and every fresh session's startup restore) rewrites it, so a new bare `pi` starts in whichever mode was switched to most recently on that machine, regardless of which session set it. Writes are atomic (tmp + rename), so concurrent sessions cannot corrupt the file, and one session switching modes never changes another session's in-session mode. One pre-existing minor race: a subagent child's read-only bash guard reads `.modes-state.json` directly (the child has no parent session log), so a mode switch in a different session between spawn and child startup can select the wrong guard strictness; it remains a guard rail against accidental mutation, not a security boundary.
 - **When a mode is active**, `pi-ouranos-subagents` loads agents from `~/.pi/agent/modes/<mode>/agents/*.md` (and project `.pi/modes/<mode>/agents/`) and uses each agent's `model` frontmatter — **no fleet is applied**. The `model: inherit` sentinel is resolved to the primary agent's currently selected model.
 - **When no mode is active** (e.g. the extension is uninstalled), `pi-ouranos-subagents` falls back to the existing three-layer discovery + `activeFleet` behavior. The user's `activeFleet` setting is left untouched and simply ignored whenever a mode is active.
 - The active mode's delegation-policy prompt is injected via `before_provider_request`: **appended for all modes** (plan/build/orchestrator/default). It is never replaced — the base system prompt (tools, `# Project Context` from AGENTS.md, skills, date/cwd) is always preserved. The orchestrator "delegate everything" prompt is suppressed for no-subagent modes by `pi-ouranos-subagents` *not injecting it* in its `before_agent_start` zero-agent branch, not by replacing the system prompt.
@@ -73,7 +74,17 @@ Delete the `modePrefs.<mode>` entry (or the whole `modePrefs` object) from `sett
 | Previous mode | `Alt+Shift+M` |
 | Start in a mode | `pi --mode=<name>` |
 
-The chat-box bottom border shows the active mode name in the mode's color, and the mode-switch notification also shows the active model + thinking level.
+The active mode is published via `ctx.ui.setStatus("mode", …)` and surfaced by pi-powerline-footer (see the `powerline.customItems` entry in settings.json). The `color:` frontmatter is parsed for forward compatibility but currently unused — there is no per-mode theming path for the status line. Explicit mode switches (`/mode`, the cycle shortcuts, `request_mode_change`, `--mode=<name>`) show a one-line notification with the active model + thinking level; startup restores are silent (the mode is already in the footer).
+
+## Read-only bash enforcement (`bashMode: readonly`)
+
+Modes declaring `bashMode: readonly` get a `tool_call` guard on the `bash` tool: a whitelist of read-only commands (plus a read-only git subcommand whitelist), blocking of file-writing redirects, and refusal of:
+
+- command substitution (`$(...)` and backticks) — the nested command can't be validated,
+- `find` mutating flags (`-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint*`, `-fls`),
+- `env` / `command` (they execute arbitrary commands), and
+
+the `powershell` tool is blocked outright in read-only modes (no read-only validation exists for it). **Subagent children inherit the guard**: a planner spawned in a read-only mode has its bash calls validated too (the parent's active mode, read from the machine-local `.modes-state.json`, decides). This is a guard rail against accidental mutation, not a security sandbox — a determined actor can still find gaps; pair it with `excludeTools` for hard guarantees.
 
 ## Mode-Change Requests (`request_mode_change` tool)
 
@@ -143,6 +154,8 @@ A mode can hard-restrict its active tool set via frontmatter — declarative, no
 **Precedence** (in `setMode` via `computeActiveTools`):
 1. `tools:` set → active = baseline ∩ tools (the `hasAgents`→`subagent` default is NOT applied — the explicit list wins).
 2. else → active = baseline − `excludeTools`; if the mode has no agents, `subagent` is auto-excluded too (preserves the pre-existing default).
+
+The baseline is the full registered-tool set (`pi.getAllTools()`), refreshed on every mode switch rather than snapshotted once at session start. Tools that extensions register inside their own `session_start` handler (pi-compass, pi-ollama-cloud's web tools — they register after local extensions, since session_start handlers fire in load order) therefore survive mode switches instead of being silently dropped from the active set.
 
 Example — **plan mode** is hard read-only:
 ```yaml

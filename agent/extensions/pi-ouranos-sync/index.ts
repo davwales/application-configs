@@ -11,6 +11,13 @@
  * Commands:
  * - ``/pi-sync`` — commit & push uncommitted changes, then pull remote
  * - ``/pi-sync-diff`` — show a summary of uncommitted or remote changes
+ *
+ * Extras:
+ * - Pre-commit guard: protected files (auth.json, extension config.json files)
+ *   are unstaged before committing and reported, never silently committed.
+ * - Session-end reminder: on quit, warns if changes are still uncommitted or
+ *   unpushed (local checks only, no network).
+ * - Commit messages name the changed files instead of a bare timestamp.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -257,6 +264,9 @@ async function getRemoteAheadDetails(pi: ExtensionAPI): Promise<string> {
 interface SyncState {
   uncommitted: boolean;
   remoteAhead: number;
+  /** False when `git fetch` failed (offline / bad remote) — remoteAhead is
+   *  then unknown, NOT zero, and "in sync" claims are invalid. */
+  fetchOk: boolean;
 }
 
 async function detectState(pi: ExtensionAPI): Promise<SyncState | null> {
@@ -264,13 +274,29 @@ async function detectState(pi: ExtensionAPI): Promise<SyncState | null> {
 
   const uncommitted = await hasUncommittedChanges(pi);
 
-  let remoteAhead = 0;
   const fetchOk = await fetchRemote(pi);
+  let remoteAhead = 0;
   if (fetchOk && (await hasUpstream(pi))) {
     remoteAhead = await countRemoteAhead(pi);
   }
 
-  return { uncommitted, remoteAhead };
+  return { uncommitted, remoteAhead, fetchOk };
+}
+
+/** Local commits that exist on HEAD but not on the upstream branch — i.e. a
+ *  push is pending even when nothing is uncommitted (e.g. a previous push
+ *  failed after the commit succeeded). */
+async function countLocalAhead(pi: ExtensionAPI): Promise<number> {
+  try {
+    const result = await pi.exec("git", ["rev-list", "--count", "@{u}..HEAD"], {
+      cwd: PI_DIR,
+    });
+    if (result.code !== 0) return 0;
+    const count = parseInt(result.stdout.trim(), 10);
+    return Number.isNaN(count) ? 0 : count;
+  } catch {
+    return 0;
+  }
 }
 
 // ─── Startup notification ────────────────────────────────────────────────────
@@ -295,20 +321,91 @@ async function reportState(pi: ExtensionAPI, ctx: ExtensionContext): Promise<voi
   } else if (state.uncommitted) {
     const files = await getChangedFileSummary(pi);
     const fileHint = files ? ` — ${files}` : "";
+    const remoteNote = state.fetchOk ? "" : " (remote unreachable — push/pull status unknown)";
     ctx.ui.notify(
-      `📝 Pi config${branchLabel}: uncommitted changes${fileHint}. Run /pi-sync to commit & push, or /pi-sync-diff to review`,
+      `📝 Pi config${branchLabel}: uncommitted changes${fileHint}. Run /pi-sync to commit & push, or /pi-sync-diff to review${remoteNote}`,
       "info",
     );
-    ctx.ui.setStatus(STATUS_BAR_KEY, "📝 pi-sync: uncommitted changes");
+    ctx.ui.setStatus(
+      STATUS_BAR_KEY,
+      state.fetchOk ? "📝 pi-sync: uncommitted changes" : "📝 pi-sync: uncommitted (remote unreachable)",
+    );
   } else if (state.remoteAhead > 0) {
     ctx.ui.notify(
       `⬇️ Pi config${branchLabel}: ${state.remoteAhead} remote commit(s) to pull. Run /pi-sync or /pi-sync-diff`,
       "info",
     );
     ctx.ui.setStatus(STATUS_BAR_KEY, `⬇️ pi-sync: ${state.remoteAhead} behind`);
+  } else if (!state.fetchOk) {
+    // Offline / bad remote with a clean tree: no toast (nothing actionable),
+    // just an ambient status so "in sync" is never claimed when unknown.
+    ctx.ui.setStatus(STATUS_BAR_KEY, "⚠️ pi-sync: remote unreachable");
   } else {
     ctx.ui.setStatus(STATUS_BAR_KEY, undefined);
   }
+}
+
+// ─── Commit-message helpers ──────────────────────────────────────────────────
+
+/** Paths that must never be committed by /pi-sync, even if git tracks them
+ *  (gitignore does not untrack files that were committed before the rule —
+ *  the context7 config.json precedent). context7/config.json is exempt: it
+ *  holds only cache TTLs. */
+const PROTECTED_PATH_EXACT = new Set(["agent/auth.json"]);
+const CONTEXT7_CONFIG = "agent/extensions/context7/config.json";
+
+function isProtectedPath(path: string): boolean {
+  if (PROTECTED_PATH_EXACT.has(path)) return true;
+  if (path === CONTEXT7_CONFIG) return false;
+  return /^agent\/extensions\/[^/]+\/config\.json$/.test(path);
+}
+
+/** Get the paths staged for the next commit. */
+async function getStagedPaths(pi: ExtensionAPI): Promise<string[]> {
+  try {
+    const result = await pi.exec("git", ["diff", "--cached", "--name-only"], {
+      cwd: PI_DIR,
+    });
+    if (result.code !== 0 || !result.stdout.trim()) return [];
+    return result.stdout.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** Unstage any protected files that ended up staged (e.g. tracked before the
+ *  gitignore rule existed). Returns the paths that were removed. */
+async function unstageProtectedPaths(
+  pi: ExtensionAPI,
+  paths: string[],
+): Promise<string[]> {
+  const removed: string[] = [];
+  for (const path of paths) {
+    if (!isProtectedPath(path)) continue;
+    try {
+      const result = await pi.exec(
+        "git",
+        ["restore", "--staged", "--", path],
+        { cwd: PI_DIR },
+      );
+      if (result.code === 0) removed.push(path);
+    } catch {
+      // Leave it staged rather than failing the whole sync; the caller warns.
+    }
+  }
+  return removed;
+}
+
+/** Build a commit message naming the changed files, e.g.
+ *  "sync pi config: settings.json, modes/plan +4 more". */
+async function buildCommitMessage(pi: ExtensionAPI): Promise<string> {
+  const paths = await getStagedPaths(pi);
+  if (paths.length === 0) {
+    return `sync pi config - ${new Date().toISOString()}`;
+  }
+  const shown = paths.slice(0, 3).join(", ");
+  const more = paths.length > 3 ? ` +${paths.length - 3} more` : "";
+  return `sync pi config: ${shown}${more}`;
 }
 
 // ─── /pi-sync command ────────────────────────────────────────────────────────
@@ -329,8 +426,9 @@ async function handlePiSync(
   const branch = await getCurrentBranch(pi);
   const branchLabel = branch ? ` on ${branch}` : "";
 
-  // Phase 1: Commit & push uncommitted changes
+  // Phase 1: commit uncommitted changes (if any).
   const uncommitted = await hasUncommittedChanges(pi);
+  let committed = false;
 
   if (uncommitted) {
     ctx.ui.setStatus(STATUS_BAR_KEY, "🔄 pi-sync: staging...");
@@ -342,10 +440,18 @@ async function handlePiSync(
     }
 
     ctx.ui.setStatus(STATUS_BAR_KEY, "🔄 pi-sync: committing...");
-    const timestamp = new Date().toISOString();
+    const staged = await getStagedPaths(pi);
+    const blocked = await unstageProtectedPaths(pi, staged);
+    if (blocked.length > 0) {
+      ctx.ui.notify(
+        `🔒 Skipped protected file(s) before commit: ${blocked.join(", ")}. They are staged no longer; review them manually.`,
+        "warning",
+      );
+    }
+    const message = await buildCommitMessage(pi);
     const commitResult = await pi.exec(
       "git",
-      ["commit", "-m", `sync pi config - ${timestamp}`],
+      ["commit", "-m", message],
       { cwd: PI_DIR },
     );
     if (commitResult.code !== 0) {
@@ -353,10 +459,69 @@ async function handlePiSync(
       ctx.ui.setStatus(STATUS_BAR_KEY, "❌ pi-sync: commit failed");
       return;
     }
-    ctx.ui.notify(`✅ Changes committed${branchLabel}.`, "info");
+    committed = true;
+  }
 
+  // Phase 2: fetch, then rebase-pull BEFORE pushing. The old order
+  // (commit → push → pull) failed the push with a non-fast-forward rejection
+  // exactly when the remote was ahead — leaving the repo half-synced with a
+  // confusing error and requiring a second /pi-sync run.
+  const fetchOk = await fetchRemote(pi);
+
+  if (!fetchOk) {
+    ctx.ui.notify(
+      committed
+        ? `⚠️ Committed locally${branchLabel}, but the remote is unreachable — pull/push skipped. Run /pi-sync again when back online.`
+        : `⚠️ Remote unreachable${branchLabel} — nothing synced. Run /pi-sync again when back online.`,
+      "warning",
+    );
+    ctx.ui.setStatus(
+      STATUS_BAR_KEY,
+      committed ? "⚠️ pi-sync: committed (remote unreachable)" : "⚠️ pi-sync: remote unreachable",
+    );
+    return;
+  }
+
+  const upstream = await hasUpstream(pi);
+  let pulled = 0;
+  let localAhead = 0;
+
+  if (upstream) {
+    pulled = await countRemoteAhead(pi);
+    if (pulled > 0) {
+      ctx.ui.setStatus(STATUS_BAR_KEY, "🔄 pi-sync: pulling...");
+      const pullResult = await pi.exec("git", ["pull", "--rebase"], {
+        cwd: PI_DIR,
+        timeout: GIT_TIMEOUT,
+      });
+      if (pullResult.code !== 0) {
+        ctx.ui.notify(
+          `❌ Pull failed: ${pullResult.stderr} (fix the rebase, then run /pi-sync again — the commit is safe.)`,
+          "error",
+        );
+        ctx.ui.setStatus(STATUS_BAR_KEY, "❌ pi-sync: pull failed");
+        return;
+      }
+    }
+    localAhead = await countLocalAhead(pi);
+  }
+
+  // Phase 3: push if there is anything local to send (a fresh commit, or
+  // commits left unpushed by a previous failed push).
+  let pushed = false;
+  if (committed || localAhead > 0) {
+    if (!branch) {
+      ctx.ui.notify(
+        "⚠️ Detached HEAD — changes are committed locally but there is no branch to push. Push manually.",
+        "warning",
+      );
+      ctx.ui.setStatus(STATUS_BAR_KEY, "⚠️ pi-sync: detached HEAD");
+      return;
+    }
     ctx.ui.setStatus(STATUS_BAR_KEY, "🔄 pi-sync: pushing...");
-    const pushArgs = branch ? ["push", "origin", branch] : ["push", "origin"];
+    // Plain `git push` uses the configured upstream; `-u origin <branch>`
+    // establishes it on the first push.
+    const pushArgs = upstream ? ["push"] : ["push", "-u", "origin", branch];
     const pushResult = await pi.exec("git", pushArgs, {
       cwd: PI_DIR,
       timeout: GIT_TIMEOUT,
@@ -366,36 +531,19 @@ async function handlePiSync(
       ctx.ui.setStatus(STATUS_BAR_KEY, "❌ pi-sync: push failed");
       return;
     }
-    ctx.ui.notify(`✅ Changes pushed to remote${branchLabel}.`, "info");
+    pushed = true;
   }
 
-  // Phase 2: Pull remote commits if ahead
-  const fetchOk = await fetchRemote(pi);
-  let remoteAhead = 0;
-  if (fetchOk && (await hasUpstream(pi))) {
-    remoteAhead = await countRemoteAhead(pi);
-  }
-
-  if (remoteAhead > 0) {
-    ctx.ui.notify(`🔄 Pulling ${remoteAhead} remote commit(s)${branchLabel}...`, "info");
-    ctx.ui.setStatus(STATUS_BAR_KEY, "🔄 pi-sync: pulling...");
-
-    const pullResult = await pi.exec("git", ["pull", "--rebase", "origin"], {
-      cwd: PI_DIR,
-      timeout: GIT_TIMEOUT,
-    });
-    if (pullResult.code !== 0) {
-      ctx.ui.notify(`❌ Pull failed: ${pullResult.stderr}`, "error");
-      ctx.ui.setStatus(STATUS_BAR_KEY, "❌ pi-sync: pull failed");
-      return;
-    }
-    ctx.ui.notify(`✅ Pulled ${remoteAhead} remote commit(s)${branchLabel}.`, "info");
-  }
-
-  if (!uncommitted && remoteAhead === 0) {
+  // One summary notification — no per-phase toasts.
+  const parts: string[] = [];
+  if (committed) parts.push("committed");
+  if (pulled > 0) parts.push(`pulled ${pulled} commit${pulled !== 1 ? "s" : ""}`);
+  if (pushed) parts.push("pushed");
+  if (parts.length > 0) {
+    ctx.ui.notify(`✅ Pi config${branchLabel} synced: ${parts.join(", ")}.`, "info");
+  } else {
     ctx.ui.notify(`✅ Pi config${branchLabel} is already in sync.`, "info");
   }
-
   ctx.ui.setStatus(STATUS_BAR_KEY, undefined);
 }
 
@@ -420,6 +568,16 @@ async function handlePiSyncDiff(
   const state = await detectState(pi);
   if (!state) {
     ctx.ui.notify("~/.pi/ is not a git repository.", "error");
+    return;
+  }
+
+  // Honest reporting: a failed fetch means remote-ahead is UNKNOWN, not zero —
+  // never claim "in sync" while offline.
+  if (!state.uncommitted && !state.fetchOk) {
+    ctx.ui.notify(
+      `Could not reach the remote${branchLabel} — remote status unknown. The local tree is clean.`,
+      "warning",
+    );
     return;
   }
 
@@ -492,5 +650,35 @@ export default function (pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       await handlePiSyncDiff(pi, args, ctx);
     },
+  });
+
+  // On quit (only quit — reload/new/resume/fork continue in another session):
+  // remind about uncommitted or unpushed config changes. Local checks only,
+  // no network fetch, so shutdown never stalls.
+  pi.on("session_shutdown", async (event, ctx) => {
+    if (event.reason !== "quit" || !ctx.hasUI) return;
+    try {
+      if (!(await isGitRepo(pi))) return;
+      const uncommitted = await hasUncommittedChanges(pi);
+      const localAhead = await countLocalAhead(pi);
+      if (uncommitted && localAhead > 0) {
+        ctx.ui.notify(
+          `📝 Pi config: uncommitted changes and ${localAhead} unpushed commit(s). Run /pi-sync next session.`,
+          "warning",
+        );
+      } else if (uncommitted) {
+        ctx.ui.notify(
+          "📝 Pi config has uncommitted changes. Run /pi-sync next session.",
+          "warning",
+        );
+      } else if (localAhead > 0) {
+        ctx.ui.notify(
+          `⬆️ Pi config has ${localAhead} unpushed commit(s). Run /pi-sync next session.`,
+          "warning",
+        );
+      }
+    } catch {
+      // Never block shutdown over a reminder.
+    }
   });
 }

@@ -21,7 +21,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, getAgentDir, getMarkdownTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type AgentConfig, type AgentScope, applyAgentOverrides, applyFleet, discoverAgents, findProjectModeAgentsDir, formatAvailableAgents, getFleetAgentNames, loadActiveFleet, loadModeAgents, readActiveModeFromSession, readActiveModeFromSettings, resolveInheritance } from "./agents.js";
+import { type AgentConfig, type AgentScope, applyAgentOverrides, applyFleet, discoverAgents, findProjectModeAgentsDir, formatAvailableAgents, getFleetAgentNames, loadActiveFleet, loadModeAgents, readActiveModeFromSession, readActiveModeFromSettings, readSubagentTimeoutMs, resolveInheritance } from "./agents.js";
 
 
 
@@ -287,6 +287,7 @@ async function runSingleAgent(
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
+	timeoutMs?: number,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -348,8 +349,13 @@ async function runSingleAgent(
 		}
 
 		const effectiveCwd = cwd ?? defaultCwd;
-		args.push(`Task: Working directory: ${effectiveCwd}\n\n${task}`);
+		// The prompt is piped through stdin: pi's print mode merges piped stdin
+		// into the initial prompt. Passing the task as a CLI positional argument
+		// caps it at the OS single-argument limit (~128KB on Linux) — longer
+		// tasks failed with E2BIG and a cryptic "(no output)" error.
+		const prompt = `Task: Working directory: ${effectiveCwd}\n\n${task}`;
 		let wasAborted = false;
+		let timedOut = false;
 
 		const exitCode = await new Promise<number>((resolve) => {
 			const invocation = getPiInvocation(args);
@@ -357,7 +363,7 @@ async function runSingleAgent(
 				cwd: cwd ?? defaultCwd,
 				env: { ...process.env, PI_SUBAGENT: "1" },
 				shell: false,
-				stdio: ["ignore", "pipe", "pipe"],
+				stdio: ["pipe", "pipe", "pipe"],
 			});
 			let buffer = "";
 
@@ -404,9 +410,36 @@ async function runSingleAgent(
 				currentResult.stderr += data.toString();
 			});
 
+			// Write the prompt to stdin and close it — print mode reads piped
+			// stdin to EOF before starting the agent. EPIPE (child died early)
+			// is expected in failure paths; the close handler reports the exit.
+			proc.stdin.on("error", () => {});
+			proc.stdin.write(prompt);
+			proc.stdin.end();
+
+			// Optional hard cap (settings.json subagents.timeoutMs). A hung child
+			// would otherwise block the tool call until the user aborts manually.
+			let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+			if (timeoutMs && timeoutMs > 0) {
+				timeoutHandle = setTimeout(() => {
+					timedOut = true;
+					proc.kill("SIGTERM");
+					setTimeout(() => {
+						// proc.killed is true as soon as SIGTERM is *sent*, so it can't
+						// tell us whether the child actually exited. exitCode/signalCode
+						// stay null until the process is gone.
+						if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+					}, 5000);
+				}, timeoutMs);
+			}
+
 			proc.on("close", (code) => {
+				if (timeoutHandle) clearTimeout(timeoutHandle);
 				if (buffer.trim()) processLine(buffer);
-				resolve(code ?? 0);
+				// A null exit code means the process was killed by a signal — treat
+				// it as failure (1), not success. The explicit abort path above
+				// throws separately; this covers every other kill (timeout, OOM…).
+				resolve(code ?? 1);
 			});
 
 			proc.on("error", () => {
@@ -418,7 +451,9 @@ async function runSingleAgent(
 					wasAborted = true;
 					proc.kill("SIGTERM");
 					setTimeout(() => {
-						if (!proc.killed) proc.kill("SIGKILL");
+						// Same check as the timeout path: proc.killed is true as soon as
+						// SIGTERM is sent; only SIGKILL if the child hasn't exited.
+						if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
 					}, 5000);
 				};
 				if (typeof signal.addEventListener === 'function') signal.addEventListener("abort", killProc, { once: true });
@@ -428,6 +463,10 @@ async function runSingleAgent(
 
 		currentResult.exitCode = exitCode;
 		if (wasAborted) throw new Error("Subagent was aborted");
+		if (timedOut) {
+			currentResult.stopReason = "timeout";
+			currentResult.errorMessage = `Subagent timed out after ${Math.round((timeoutMs ?? 0) / 1000)}s`;
+		}
 		return currentResult;
 	} finally {
 		if (tmpPromptPath)
@@ -725,6 +764,9 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const agentScope: AgentScope = params.agentScope ?? "user";
 			const agentDir = getAgentDir();
+			// Optional hard cap on subagent runtime (settings.json
+			// subagents.timeoutMs). Undefined = no timeout (previous behavior).
+			const timeoutMs = readSubagentTimeoutMs(agentDir);
 
 			// Resolve the agent set. When a mode is active (set by pi-ouranos-modes
 			// via a per-session session-log entry — `modes-state` custom entry
@@ -814,16 +856,17 @@ export default function (pi: ExtensionAPI) {
 				signal,
 				onUpdate,
 				(r) => makeDetails(r),
+				timeoutMs,
 			);
 			const isError = isSubagentError(result);
 			if (isError) {
 				const errorMsg =
 					result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
-				return {
-					content: [{ type: "text", text: `Agent ${result.stopReason || "failed"}: ${errorMsg}` }],
-					details: makeDetails([result]),
-					isError: true,
-				};
+				// Thrown, not returned: pi only marks a tool result as an error
+				// (isError: true) when execute throws — returned objects are always
+				// treated as success, which previously rendered failed subagents
+				// as successful tool calls.
+				throw new Error(`Agent ${result.stopReason || "failed"}: ${errorMsg}`);
 			}
 			return {
 				content: [{ type: "text", text: getFinalOutput(result.messages) || "(no output)" }],
@@ -946,11 +989,13 @@ export default function (pi: ExtensionAPI) {
 			// injecting the "delegate everything" philosophy here would directly
 			// contradict the lighter-delegation intent of those modes.
 			if (activeMode === "orchestrator") {
-				// Orchestrator mode: full orchestrator prompt + agent availability
-				// context, appended to the base system prompt.
+				// Orchestrator mode: full orchestrator prompt (when available) +
+				// agent availability context, appended to the base system prompt.
+				// A missing prompt file must not drop the agent-availability
+				// injection — only the prompt block is conditional.
 				const prompt = loadOrchestratorPrompt();
-				if (!prompt) return;
-				return { systemPrompt: `${event.systemPrompt}\n\n${prompt}${agentContext}` };
+				const promptBlock = prompt ? `\n\n${prompt}` : "";
+				return { systemPrompt: `${event.systemPrompt}${promptBlock}${agentContext}` };
 			}
 			if (resolved.length > 0) {
 				// Non-orchestrator has-subagent mode: agent availability context

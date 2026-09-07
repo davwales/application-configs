@@ -4,8 +4,6 @@ description: Maps user requirements and frontend specs into structured component
 tools: read, grep, find, ls
 model: ollama-cloud/kimi-k2.7-code
 thinking: medium
-inheritProjectContext: true
-inheritSkills: true
 defaultContext: fresh
 ---
 

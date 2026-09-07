@@ -47,7 +47,7 @@ function toRepoPayload(repo: GiteaRepository, host: string, owner: string, name:
     owner: repo.owner?.login,
     default_branch: repo.default_branch,
     language: repo.language ?? null,
-    stars: repo.stars ?? 0,
+    stars: repo.stars_count ?? repo.stars ?? 0,
     forks: repo.forks_count ?? 0,
     open_issues: repo.open_issues_count ?? 0,
     private: repo.private ?? false,
@@ -383,17 +383,20 @@ export function registerRepoTools(pi: ExtensionAPI, deps: GiteaDeps): void {
       try {
         const repoCtx = await resolveRepoContext(params, pi, ctx, knownInstances);
         const client = new GiteaClient(repoCtx.apiBase, repoCtx.host);
-        const result = await client.getPaged<GiteaCommit>(
-          `/repos/${repoCtx.owner}/${repoCtx.repo}/commits`,
-          { sha: params.sha },
-          1,
-          1,
-          signal,
-        );
-        if (!result.data || result.data.length === 0) {
-          return toErrorResponse(new GiteaNotFoundError(`commit ${params.sha} not found in ${repoCtx.owner}/${repoCtx.repo}`));
+        // The single-commit endpoint (unlike the list endpoint) includes files and stats.
+        let commit: GiteaCommit;
+        try {
+          commit = await client.get<GiteaCommit>(
+            `/repos/${repoCtx.owner}/${repoCtx.repo}/git/commits/${encodeURIComponent(params.sha)}`,
+            {},
+            signal,
+          );
+        } catch (err) {
+          if (err instanceof GiteaNotFoundError) {
+            throw new GiteaNotFoundError(`commit ${params.sha} not found in ${repoCtx.owner}/${repoCtx.repo}`);
+          }
+          throw err;
         }
-        const commit = result.data[0];
         const payload = toCommitPayload(commit, repoCtx.host, repoCtx.owner, repoCtx.repo, maxBodyChars, maxPatchChars);
         // Not cached (TTL 0 for commits).
         return okResult(payload);

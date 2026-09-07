@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.84.4",
+  "lastChangelogVersion": "0.85.1",
   "packages": [
     "npm:pi-ollama-cloud",
     "npm:@ifi/oh-pi-themes",
@@ -13,18 +13,15 @@
     "./agent/extensions/pi-ouranos-gitea",
     "./agent/extensions/pi-ouranos-github",
     "./agent/extensions/pi-ouranos-modes",
+    "./agent/extensions/pi-ouranos-subagents",
+    "./agent/extensions/pi-ouranos-sync",
     "./agent/extensions/pi-ouranos-todo",
     "npm:pi-mcp-adapter"
   ],
   "defaultProvider": "ollama-cloud",
   "defaultModel": "glm-5.3-flash",
   "subagents": {
-    "asyncByDefault": true,
-    "control": {
-      "enabled": true,
-      "needsAttentionAfterMs": 300000,
-      "activeNoticeAfterMs": 600000
-    }
+    "timeoutMs": 600000
   },
   "theme": "catppuccin-mocha",
   "defaultThinkingLevel": "xhigh",

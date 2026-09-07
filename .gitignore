@@ -1,5 +1,10 @@
 # Sensitive / Secret Files
 agent/auth.json
+# Extension config.json files can hold auth tokens (e.g. pi-ouranos-github
+# auth.token) — never let /pi-sync commit them. Exception:
+# context7/config.json holds only cache TTLs and is tracked.
+agent/extensions/*/config.json
+!agent/extensions/context7/config.json
 
 # Session & Runtime Data
 agent/run-history.jsonl
@@ -10,8 +15,15 @@ agent/.modes-state.json
 
 # Cached Data
 agent/cache/
+agent/models-store.json
+agent/mcp-cache.json
+agent/mcp-npx-cache.json
 agent/extensions/context7/cache/
 agent/extensions/pi-ouranos-gitea/cache/
+agent/extensions/pi-ouranos-github/cache/
+
+# Machine-local Trust Decisions (per-machine directory trust grants)
+agent/trust.json
 
 # Auto-managed Binaries
 agent/bin/
@@ -24,6 +36,7 @@ compass/
 
 # Temp / Generated
 context.md
+package-lock.json
 *.log
 .DS_Store
 Thumbs.db

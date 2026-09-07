@@ -21,6 +21,8 @@ Precedence: `config.json` `auth.token` → `GITHUB_TOKEN` env → `GH_TOKEN` env
 
 The token is sent as `Authorization: Bearer <token>` on every request and is **never logged or included in error messages**. `github_cache_status` reports whether a token is configured.
 
+> **⚠️ Prefer env vars in this repo.** `~/.pi` is a git repository that `/pi-sync` auto-commits and pushes. `agent/extensions/*/config.json` is **gitignored** to keep tokens out of that sync — but if you ever un-ignore it or store the token elsewhere under `~/.pi`, a stray `/pi-sync` publishes it. Env vars (`GITHUB_TOKEN`/`GH_TOKEN`) are the safe default; use `config.json` only on machines where `~/.pi` is not a synced repo.
+
 ## Configuration
 
 `config.json` is optional. Example:

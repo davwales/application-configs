@@ -153,10 +153,14 @@ export interface GiteaRepository {
   ssh_url?: string;
   website?: string;
   language?: string;
+  // Gitea/Forgejo return stars_count / watchers_count. Older Gitea versions
+  // used stars / watchers — keep both as optional and prefer *_count everywhere.
   stars?: number;
+  stars_count?: number;
   forks_count?: number;
   open_issues_count?: number;
   watchers?: number;
+  watchers_count?: number;
   default_branch?: string;
   created_at?: string;
   updated_at?: string;

@@ -1,6 +1,6 @@
 {
   "name": "pi-ouranos-gitea",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Read-only, no-auth Gitea/Forgejo/Codeberg tools for the Pi Coding Agent. Auto-detects repo from git remote, caches across sessions.",
   "type": "module",
   "keywords": [

@@ -10,6 +10,29 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 export type AgentScope = "user" | "project" | "both";
 
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+/**
+ * Append a thinking level to a model id as a `:level` suffix, matching the
+ * applyFleet()/applyAgentOverrides() convention.
+ *
+ * Model ids can contain colons that are NOT thinking separators (e.g.
+ * `ollama-cloud/deepseek-v4-flash:0731-cloud`), so gating on `includes(":")`
+ * silently dropped the thinking level for those. Instead, check whether the
+ * trailing token after the last colon is already a thinking level — if so,
+ * keep the existing suffix (don't append twice); otherwise append.
+ */
+function foldThinkingIntoModel(model: string, thinking: string): string {
+	if (!thinking) {
+		return model;
+	}
+	const colonIdx = model.lastIndexOf(":");
+	if (colonIdx !== -1 && THINKING_LEVELS.has(model.slice(colonIdx + 1))) {
+		return model;
+	}
+	return `${model}:${thinking}`;
+}
+
 export interface AgentConfig {
 	name: string;
 	description: string;
@@ -67,8 +90,8 @@ function loadAgentsFromDir(dir: string, source: "user" | "project" | "package"):
 		// The "inherit" sentinels are resolved later by resolveInheritance()
 		// against the primary agent's model + thinking — don't fold the thinking
 		// suffix into the model here for either sentinel.
-		if (model && model !== "inherit" && frontmatter.thinking && frontmatter.thinking !== "inherit" && !model.includes(":")) {
-			model = `${model}:${frontmatter.thinking}`;
+		if (model && model !== "inherit" && frontmatter.thinking && frontmatter.thinking !== "inherit") {
+			model = foldThinkingIntoModel(model, frontmatter.thinking);
 		}
 
 		agents.push({
@@ -281,6 +304,25 @@ export function getFleetAgentNames(fleet: FleetConfig | null): string[] | null {
 }
 
 /**
+ * Read the optional subagent timeout (ms) from settings.json
+ * (`subagents.timeoutMs`). A positive finite number enables a hard cap on
+ * subagent runtime; anything else means no timeout.
+ */
+export function readSubagentTimeoutMs(agentDir: string): number | undefined {
+	try {
+		const settingsPath = path.join(agentDir, "settings.json");
+		if (!fs.existsSync(settingsPath)) return undefined;
+		const content = fs.readFileSync(settingsPath, "utf-8");
+		const settings = JSON.parse(content);
+		const v = settings?.subagents?.timeoutMs;
+		if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+	} catch {
+		/* ignore — no timeout */
+	}
+	return undefined;
+}
+
+/**
  * Apply agent overrides to a list of agents.
  * An override model takes precedence over frontmatter model.
  * Thinking levels are appended as `:level` suffixes to the model string.
@@ -291,11 +333,27 @@ export function applyAgentOverrides(agents: AgentConfig[], agentDir: string): Ag
 		const override = overrides[agent.name];
 		if (!override) return agent;
 
+		// `model: inherit` must stay a sentinel — resolveInheritance() resolves it
+		// against the primary agent's model later. Folding a thinking suffix into
+		// it (the old behavior) produced `inherit:level`, which never resolved and
+		// failed at spawn. A thinking override is applied via the thinking field
+		// instead; resolveInheritance folds it into the resolved model string.
+		// An explicit override.model replaces the sentinel and takes the normal
+		// suffix-folding path below.
 		let model = override.model ?? agent.model;
+		if (model === "inherit") {
+			return { ...agent, thinking: override.thinking ?? agent.thinking };
+		}
+
 		if (model && override.thinking) {
-			// Strip existing thinking suffix before applying override
+			// Strip an existing thinking suffix before applying the override — but
+			// only when the text after the final colon is a known thinking level.
+			// Model IDs can legitimately contain colons (e.g. HF quant variants),
+			// and the old unconditional strip corrupted those.
 			const colonIdx = model.lastIndexOf(":");
-			if (colonIdx !== -1) model = model.slice(0, colonIdx);
+			if (colonIdx !== -1 && THINKING_LEVELS.has(model.slice(colonIdx + 1))) {
+				model = model.slice(0, colonIdx);
+			}
 			model = `${model}:${override.thinking}`;
 		}
 
@@ -490,9 +548,10 @@ export function resolveInheritance(
 
 	// Fold the resolved thinking into the model string as a `:level` suffix,
 	// matching applyFleet()'s convention. Only append when the model doesn't
-	// already carry a thinking suffix (e.g. an explicit `model: id:level`).
-	if (resolvedModel && resolvedThinking && !resolvedModel.includes(":")) {
-		resolvedModel = `${resolvedModel}:${resolvedThinking}`;
+	// already carry a thinking suffix (e.g. an explicit `model: id:level`);
+	// colons that aren't thinking separators don't block the append.
+	if (resolvedModel && resolvedThinking) {
+		resolvedModel = foldThinkingIntoModel(resolvedModel, resolvedThinking);
 	}
 	return { ...agent, model: resolvedModel, thinking: resolvedThinking };
 }

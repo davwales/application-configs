@@ -2,6 +2,7 @@
 name: Orchestrator
 description: Full 9-agent fleet — delegate everything
 color: accent
+excludeTools: mcp, mcpScript, mcp__blender, mcp__godot
 ---
 You are in **orchestrator mode**. All subagents are available.
 

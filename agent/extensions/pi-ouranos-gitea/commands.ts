@@ -9,17 +9,20 @@ import { detectRepo, parseShorthandRef, resolveRepoContext } from "./detect.js";
 import { GiteaClient } from "./api.js";
 import type { GiteaIssue, GiteaPullRequest, GiteaRepository } from "./types.js";
 
+// pi's getArgumentCompletions expects { value, label } items — anything else
+// renders as blank/unusable completion rows.
 interface AutocompleteItem {
-  name: string;
-  description: string;
+  value: string;
+  label: string;
+  description?: string;
 }
 
 const SUBCOMMANDS: AutocompleteItem[] = [
-  { name: "issue", description: "/gitea issue <ref> — show an issue (#42, owner/repo#42, or URL)" },
-  { name: "pr", description: "/gitea pr <ref> — show a pull request (!42, owner/repo!42, or URL)" },
-  { name: "repo", description: "/gitea repo [owner/repo] — show repo metadata" },
-  { name: "search", description: "/gitea search <query> — search issues on the detected instance" },
-  { name: "cache", description: "/gitea cache [clear|status] — inspect or clear the read cache" },
+  { value: "issue", label: "issue", description: "/gitea issue <ref> — show an issue (#42, owner/repo#42, or URL)" },
+  { value: "pr", label: "pr", description: "/gitea pr <ref> — show a pull request (!42, owner/repo!42, or URL)" },
+  { value: "repo", label: "repo", description: "/gitea repo [owner/repo] — show repo metadata" },
+  { value: "search", label: "search", description: "/gitea search <query> — search issues on the detected instance" },
+  { value: "cache", label: "cache", description: "/gitea cache [clear|status] — inspect or clear the read cache" },
 ];
 
 export function registerGiteaCommand(pi: ExtensionAPI, deps: GiteaDeps): void {
@@ -32,7 +35,7 @@ export function registerGiteaCommand(pi: ExtensionAPI, deps: GiteaDeps): void {
     getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
       const token = prefix.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
       if (!token) return SUBCOMMANDS;
-      const matches = SUBCOMMANDS.filter((s) => s.name.startsWith(token));
+      const matches = SUBCOMMANDS.filter((s) => s.value.startsWith(token));
       return matches.length > 0 ? matches : null;
     },
     handler: async (args: string, ctx: ExtensionContext): Promise<void> => {
@@ -199,7 +202,7 @@ export function registerGiteaCommand(pi: ExtensionAPI, deps: GiteaDeps): void {
       `## ${repoRef(repoCtx.host, repoCtx.owner, repoCtx.repo)}\n\n` +
       `- **Description:** ${r.description || "_(none)_"}\n` +
       `- **Default branch:** ${r.default_branch ?? "?"}\n` +
-      `- **Stars / Forks / Open issues:** ${r.stars ?? 0} / ${r.forks_count ?? 0} / ${r.open_issues_count ?? 0}\n` +
+      `- **Stars / Forks / Open issues:** ${r.stars_count ?? r.stars ?? 0} / ${r.forks_count ?? 0} / ${r.open_issues_count ?? 0}\n` +
       `- **Language:** ${r.language ?? "?"}\n` +
       `- **Private / Archived / Fork:** ${r.private ?? false} / ${r.archived ?? false} / ${r.fork ?? false}\n` +
       `- **Created / Updated:** ${r.created_at ?? "?"} / ${r.updated_at ?? "?"}\n` +

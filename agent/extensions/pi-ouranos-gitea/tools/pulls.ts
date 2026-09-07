@@ -16,6 +16,12 @@ const StateParam = StringEnum(["open", "closed", "all"] as const, {
   description: "Filter by state. Default: open.",
 });
 
+// The search tool sends no state filter when unset (Gitea then returns open AND
+// closed) — the shared StateParam's "Default: open" description would be wrong.
+const SearchStateParam = StringEnum(["open", "closed", "all"] as const, {
+  description: "Filter by state. Default: all — both open and closed (no state filter is sent).",
+});
+
 const RepoParams = {
   owner: Type.Optional(Type.String({ description: "Repository owner. If omitted, auto-detect from git remote." })),
   repo: Type.Optional(Type.String({ description: "Repository name. If omitted, auto-detect from git remote." })),
@@ -77,7 +83,7 @@ function toReviewPayload(review: GiteaPRReview, host: string, owner: string, rep
     submitted_at: review.submitted_at ?? review.updated_at,
     body: body.text,
     truncated: body.truncated,
-    comments: (review.comments ?? []).map((c) => toReviewCommentPayload(c, maxBodyChars)),
+    comments: (review.comments ?? []).map((c) => toReviewCommentPayload(c, maxBody)),
   };
 }
 
@@ -289,7 +295,7 @@ export function registerPullRequestTools(pi: ExtensionAPI, deps: GiteaDeps): voi
     parameters: Type.Object({
       ...RepoParams,
       query: Type.String({ description: "Search query." }),
-      state: Type.Optional(StateParam),
+      state: Type.Optional(SearchStateParam),
       limit: Type.Optional(Type.Number({ description: "Max results." })),
       page: Type.Optional(Type.Number({ description: "Page number (1-based)." })),
     }),

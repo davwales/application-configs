@@ -43,7 +43,7 @@ function toLabelPayload(label: GiteaLabel, host: string, owner: string, repo: st
 function toMilestonePayload(milestone: GiteaMilestone, host: string, owner: string, repo: string, maxBody: number) {
   return {
     canonical_ref: repoRef(host, owner, repo),
-    web_url: `https://${host}/${owner}/${repo}/milestones/${milestone.id ?? ""}`,
+    web_url: `https://${host}/${owner}/${repo}/milestone/${milestone.id ?? ""}`,
     id: milestone.id,
     title: milestone.title,
     description: truncateText(milestone.description ?? "", maxBody).text,

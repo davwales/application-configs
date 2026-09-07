@@ -1,9 +1,0 @@
-{
-  "name": "fast",
-  "agents": {
-    "scout": { "provider": "ollama-cloud", "model": "deepseek-v4-flash:0731-cloud", "thinking": "low" },
-    "architect": { "provider": "ollama-cloud", "model": "deepseek-v4-flash:0731-cloud", "thinking": "high" },
-    "backend-developer": { "provider": "ollama-cloud", "model": "deepseek-v4-flash:0731-cloud", "thinking": "high" },
-    "worker": { "provider": "ollama-cloud", "model": "deepseek-v4-flash:0731-cloud", "thinking": "medium" }
-  }
-}

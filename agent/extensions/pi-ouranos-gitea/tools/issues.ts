@@ -17,6 +17,13 @@ const StateParam = StringEnum(["open", "closed", "all"] as const, {
   description: "Filter by state. Default: open.",
 });
 
+// Search tools send no type/state filter when unset (Gitea then returns open AND
+// closed, issues and PRs) — the shared StateParam's "Default: open" description
+// would be wrong for them.
+const SearchStateParam = StringEnum(["open", "closed", "all"] as const, {
+  description: "Filter by state. Default: all — both open and closed (no state filter is sent).",
+});
+
 const RepoParams = {
   owner: Type.Optional(Type.String({ description: "Repository owner. If omitted, auto-detect from git remote." })),
   repo: Type.Optional(Type.String({ description: "Repository name. If omitted, auto-detect from git remote." })),
@@ -215,16 +222,17 @@ export function registerIssueTools(pi: ExtensionAPI, deps: GiteaDeps): void {
     name: "gitea_search_issues",
     label: "Gitea: Search Issues",
     description:
-      "Search issues across one repo (or all accessible public repos on the instance) by query string (public repos only). Uses the Gitea issues search endpoint.",
+      "Search issues (and optionally PRs) in a Gitea/Forgejo/Codeberg repository by query string (public repos only). Always scoped to one repo: explicit owner/repo or auto-detected from the git remote. Uses the repo's issues endpoint with a q filter.",
     promptSnippet: "Search Gitea issues by query",
     promptGuidelines: [
-      "Provide q (the query). Scoped to a repo when owner/repo is given; otherwise searches the whole instance.",
+      "Provide q (the query). Scoped to a repo (auto-detected from git remote or explicit owner/repo).",
+      "type 'pr' searches pull requests only, 'issue' searches issues only. Default: both.",
     ],
     parameters: Type.Object({
       ...RepoParams,
       query: Type.String({ description: "Search query (matches issue title and body)." }),
-      state: Type.Optional(StateParam),
-      type: Type.Optional(StringEnum(["issue", "pr", "all"] as const, { description: "Restrict to issues or PRs. Default: all." })),
+      state: Type.Optional(SearchStateParam),
+      type: Type.Optional(StringEnum(["issue", "pr", "all"] as const, { description: "Restrict to issues or PRs. Default: all — both issues and PRs." })),
       limit: Type.Optional(Type.Number({ description: "Max results." })),
       page: Type.Optional(Type.Number({ description: "Page number (1-based)." })),
     }),
@@ -243,9 +251,14 @@ export function registerIssueTools(pi: ExtensionAPI, deps: GiteaDeps): void {
         const cacheKey = `search_${params.query}_${params.state ?? ""}_${params.type ?? ""}_${page}_${limit}`;
         const cached = cache.get(repoCtx.host, repoCtx.owner, repoCtx.repo, "search_issues", cacheKey);
         if (cached) return okResult(cached);
+        // Gitea's `type` param: "issues" | "pulls", omitted = both. Map the
+        // tool's "all" to omitted — the old code sent type=issues for "all",
+        // silently dropping PRs from "both" searches.
+        const typeFilter =
+          params.type === "pr" ? "pulls" : params.type === "issue" ? "issues" : undefined;
         const { data, totalCount } = await client.getPaged<GiteaIssue>(
           `/repos/${repoCtx.owner}/${repoCtx.repo}/issues`,
-          { type: params.type === "pr" ? "pulls" : "issues", q: params.query, state: params.state ?? "all" },
+          { type: typeFilter, q: params.query, state: params.state ?? "all" },
           page,
           limit,
           signal,

@@ -98,12 +98,34 @@ export function milestoneUrl(host: string, owner: string, repo: string, number: 
 
 // ─── Error normalization ──────────────────────────────────────────────────────
 
-/** Convert a thrown error into a friendly tool result with `GitHubErrorResponse`. */
-export function toErrorResponse(err: unknown): {
-  content: { type: "text"; text: string }[];
-  details: GitHubErrorResponse;
-  isError: true;
-} {
+/** Structured error thrown from tool execute() so pi marks the tool result as
+ *  an error (isError: true, rendered as a failed call). The agent runtime
+ *  treats ANY returned object as success — only a thrown error marks a call
+ *  as failed — so tool errors must be thrown, not returned. The thrown
+ *  message becomes the LLM-facing tool result content. */
+export class GitHubToolError extends Error {
+  kind: GitHubErrorResponse["error"];
+  statusCode?: number;
+  retryAfterSeconds?: number;
+
+  constructor(
+    kind: GitHubErrorResponse["error"],
+    message: string,
+    statusCode?: number,
+    retryAfterSeconds?: number,
+  ) {
+    super(`❌ ${message}`);
+    this.name = "GitHubToolError";
+    this.kind = kind;
+    this.statusCode = statusCode;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/** Normalize a thrown error into a friendly GitHubToolError (thrown onward).
+ *  Callers use it as `return toErrorResponse(err)` inside catch — throwing from
+ *  the catch block propagates out of execute(), which is exactly what we want. */
+export function toErrorResponse(err: unknown): never {
   let kind: GitHubErrorResponse["error"];
   let message: string;
   let statusCode: number | undefined;
@@ -141,11 +163,7 @@ export function toErrorResponse(err: unknown): {
     message = String(err);
   }
 
-  return {
-    content: [{ type: "text", text: `❌ ${message}` }],
-    details: { error: kind, message, statusCode, retryAfterSeconds },
-    isError: true,
-  };
+  throw new GitHubToolError(kind, message, statusCode, retryAfterSeconds);
 }
 
 /** Build a successful tool result. */

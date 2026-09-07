@@ -16,13 +16,34 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import type { CacheEntry, CacheStatus } from "./types.js";
 
-const SANITIZE_RE = /[^a-zA-Z0-9._-]/g;
+const SAFE_RE = /[a-zA-Z0-9._-]/;
+const MAX_SEGMENT_CHARS = 180; // leave headroom under NAME_MAX (255 bytes) with room for the hash suffix
 
-/** Build the cache key segment for a single value. */
+/**
+ * Build the cache key segment for a single value. Unsafe characters are
+ * percent-encoded (uppercase hex, UTF-8) so distinct values never collide;
+ * overlong segments are truncated and suffixed with a 16-hex-char sha256 of
+ * the full segment to keep filenames under NAME_MAX.
+ */
 function sanitize(segment: string): string {
-  return segment.replace(/\//g, "_").replace(SANITIZE_RE, "_");
+  let out = "";
+  for (const ch of segment) {
+    if (SAFE_RE.test(ch)) {
+      out += ch;
+    } else {
+      for (const byte of Buffer.from(ch, "utf-8")) {
+        out += `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+      }
+    }
+  }
+  if (out.length > MAX_SEGMENT_CHARS) {
+    const hash = createHash("sha256").update(out).digest("hex").slice(0, 16);
+    return `${out.slice(0, MAX_SEGMENT_CHARS)}-${hash}`;
+  }
+  return out;
 }
 
 /** Build the cache filename (without extension) for a record. */

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+- **Errors now surface as failed tool calls.** pi only marks a tool result as an error (`isError: true`) when `execute` throws — the old `return { isError: true }` was silently ignored and rendered failures as successes. `toErrorResponse` now throws a typed `GitHubToolError` (same friendly messages).
+- Search tools (`github_search_issues`, `github_search_pull_requests`): honest `state` description — default is *all* (open + closed), not open.
+- README: warning that `config.json` lives in the auto-synced `~/.pi` repo — prefer `GITHUB_TOKEN`/`GH_TOKEN` env vars; `agent/extensions/*/config.json` is now gitignored there.
+
 ## 0.1.0 — Initial release
 - 25 read-only tools covering issues, PRs, repos & commits, labels/milestones/releases, cache
 - Optional token auth: `config.json` `auth.token` → `GITHUB_TOKEN` env → `GH_TOKEN` env → unauthenticated (60 req/hr vs 5,000 req/hr)

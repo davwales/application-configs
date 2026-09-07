@@ -16,6 +16,13 @@ const StateParam = StringEnum(["open", "closed", "all"] as const, {
   description: "Filter by state. Default: open.",
 });
 
+// Search tools omit the state qualifier entirely when unset (GitHub search
+// then returns open AND closed) — the shared StateParam's "Default: open"
+// description would be wrong for them.
+const SearchStateParam = StringEnum(["open", "closed", "all"] as const, {
+  description: "Filter by state. Default: all — both open and closed (no state qualifier is sent).",
+});
+
 const RepoParams = {
   owner: Type.Optional(Type.String({ description: "Repository owner. If omitted, auto-detect from git remote." })),
   repo: Type.Optional(Type.String({ description: "Repository name. If omitted, auto-detect from git remote." })),
@@ -354,7 +361,7 @@ export function registerPullRequestTools(pi: ExtensionAPI, deps: GitHubDeps): vo
     parameters: Type.Object({
       ...RepoParams,
       query: Type.String({ description: "Search query." }),
-      state: Type.Optional(StateParam),
+      state: Type.Optional(SearchStateParam),
       limit: Type.Optional(Type.Number({ description: "Max results." })),
       page: Type.Optional(Type.Number({ description: "Page number (1-based)." })),
     }),
