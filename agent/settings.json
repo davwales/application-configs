@@ -7,7 +7,6 @@
     "npm:pi-compass",
     "npm:@dreki-gg/pi-context7",
     "git:github.com/badlogic/pi-mono",
-    "npm:@aliou/pi-guardrails",
     "npm:@juicesharp/rpiv-ask-user-question",
     "npm:pi-powerline-footer",
     "./agent/extensions/pi-ouranos-gitea",
@@ -16,7 +15,8 @@
     "./agent/extensions/pi-ouranos-subagents",
     "./agent/extensions/pi-ouranos-sync",
     "./agent/extensions/pi-ouranos-todo",
-    "npm:pi-mcp-adapter"
+    "npm:pi-mcp-adapter",
+    "npm:@gotgenes/pi-permission-system"
   ],
   "defaultProvider": "ollama-cloud",
   "defaultModel": "glm-5.3-flash",
