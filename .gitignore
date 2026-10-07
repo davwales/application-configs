@@ -1,0 +1,19 @@
+# Ignore everything by default: ~/.claude is mostly runtime state + secrets
+/*
+
+# Tracked config
+!/.gitignore
+!/README.md
+!/settings.json
+!/statusline.sh
+!/CLAUDE.md
+!/keybindings.json
+!/agents/
+!/commands/
+!/hooks/
+!/skills/
+/skills/synced/
+
+# Never track, even if un-ignored above
+settings.local.json
+.credentials.json
