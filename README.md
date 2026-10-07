@@ -10,6 +10,7 @@ A collection of application configurations, organized by branch.
 | [`pi-coder-agent`](../../tree/pi-coder-agent) | Pi Coder Agent |
 | [`vscodium`](../../tree/vscodium) | VSCodium editor |
 | [`tmux`](../../tree/tmux) | Tmux terminal multiplexer (Catppuccin mocha) |
+| [`claude`](../../tree/claude) | Claude Code CLI (settings, statusline) |
 
 ## Usage
 
@@ -22,6 +23,7 @@ git checkout nvim            # for Neovim config
 git checkout pi-coder-agent  # for Pi Coder Agent config
 git checkout vscodium        # for VSCodium config
 git checkout tmux            # for Tmux config
+git checkout claude          # for Claude Code config
 ```
 
 Or clone a single branch directly:
