@@ -14,5 +14,6 @@
     "command": "bash ~/.claude/statusline.sh"
   },
   "tui": "fullscreen",
-  "attribution": false
+  "attribution": false,
+  "remoteControlAtStartup": true
 }
